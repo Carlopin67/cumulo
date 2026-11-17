@@ -383,7 +383,7 @@ body.returning .panel.open { transition: translate .95s cubic-bezier(.45, 0, .55
 .session.chat .b-cmd:empty, .session.chat .block.note .b-head { display: none; }
 .session.chat .b-cmd .p { display: none; }
 .session.chat .b-imgs { justify-content: flex-end; }
-.session.chat .b-out { margin-top: 12px; max-width: 96ch; }
+.session.chat .b-out { margin-top: 12px; }
 .session.chat .block.reply .b-out::before { content: "✻ Claude"; display: block; font-size: 10.5px; color: var(--accent); margin-bottom: 2px; }
 .session.chat .composer { background: var(--bg); border-top: 0; }
 .session.chat .c-row { border-radius: 12px; padding: 6px; }
