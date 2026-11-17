@@ -164,7 +164,7 @@
     <div class="pal-box" role="dialog" aria-label="Lanzador">
       <label class="pal-field">
         <svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4 14 14"/></svg>
-        <input type="text" placeholder="Abrir una app, un archivo, una sesión o una acción…" spellcheck="false" autocomplete="off" aria-label="Buscar">
+        <input type="text" placeholder="Abrir una app, un archivo, una sesión o una acción… (tecla Windows)" spellcheck="false" autocomplete="off" aria-label="Buscar">
         <kbd>Esc</kbd>
       </label>
       <ul class="pal-list" role="listbox"></ul>
@@ -221,7 +221,7 @@
       out.push(...W.slice(0, 6));
       out.push(...ACTIONS().slice(0, 3));
       out.push(...sess.slice(0, 5).map(s => ({ kind: "sess", icon: "star", name: s.title, hint: s.projectName || s.project.split(/[\\/]/).pop(), id: s.id })));
-      out.push(...apps.slice(0, 0));
+      out.push(...apps.map(a => ({ kind: "app", icon: "app", name: a.name, hint: a.group, path: a.path })));
     } else {
       out.push(...pick(W, w => w.name + " " + w.hint, 4));
       out.push(...pick(apps, a => a.name, 6).map(a => ({ kind: "app", icon: "app", name: a.name, hint: a.group, path: a.path })));
@@ -286,7 +286,7 @@
   window.addEventListener("keydown", e => {
     if (e.ctrlKey && e.code === "Space") { e.preventDefault(); e.stopPropagation(); pal.hidden ? openPal() : closePal(); }
   }, true);
-  D.onPalette(openPal);
+  D.onPalette(toggle => { if (toggle && !pal.hidden) closePal(); else openPal(); });
   window.cumuloPalette = { open: openPal, close: closePal, isOpen: () => !pal.hidden };
 })();
 

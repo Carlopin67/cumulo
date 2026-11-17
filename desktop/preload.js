@@ -18,6 +18,7 @@ ipcRenderer.on("term:exit", (_e, key, code) => { const f = listeners.exit.get(ke
 ipcRenderer.on("live", (_e, v) => { live = v; listeners.live.forEach(f => f(v)); });
 ipcRenderer.on("sys", (_e, v) => { sys = v; });
 ipcRenderer.on("palette", () => listeners.palette.forEach(f => f()));
+ipcRenderer.on("palette:toggle", () => listeners.palette.forEach(f => f(true)));
 
 contextBridge.exposeInMainWorld("CUMULO_DATA", data);
 

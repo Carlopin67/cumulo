@@ -11,6 +11,7 @@ const si = require("systeminformation");
 const sesiones = require("./sesiones");
 const ventanas = require("./ventanas");
 const contadores = require("./contadores");
+const teclawin = require("./teclawin");
 
 // --shell: Cúmulo hace de escritorio de Windows (lo arranca Windows en lugar del explorador)
 const SHELL = process.argv.includes("--shell");
@@ -277,7 +278,7 @@ ipcMain.handle("shell:set", async (_e, on) => {
   if (on && !app.isPackaged) return { ok: false, why: "Solo desde la app instalada" };
   const ok = await ventanas.shellSet(on ? process.execPath : null, app.getPath("userData"));
   // al volver a Windows normal estando de escritorio, el explorador entra ya como escritorio y barra de tareas
-  if (!on && SHELL) execFile("explorer.exe", [], { windowsHide: false });
+  if (!on && SHELL) { teclawin.stop(); execFile("explorer.exe", [], { windowsHide: false }); }
   return { ok };
 });
 
@@ -349,8 +350,21 @@ function createTray() {
 }
 
 app.on("second-instance", () => { if (win) { win.show(); win.focus(); } });
+// traer Cúmulo delante aunque otra app tenga el foco (Windows no deja robarlo sin este truco)
+function bringFront() {
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.setAlwaysOnTop(true); win.show(); win.setFullScreen(true); win.focus();
+  setTimeout(() => { if (win) win.setAlwaysOnTop(false); }, 400);
+}
 app.whenReady().then(async () => {
   if (SHELL) ventanas.runStartup(log).catch(() => {});
+  // tecla Windows: abre o cierra el lanzador (como el menú Inicio)
+  if (SHELL) teclawin.start(app.getPath("userData"), () => {
+    if (!win) return;
+    const front = win.isVisible() && !win.isMinimized() && win.isFocused();
+    if (!front) { bringFront(); send("palette"); } else send("palette:toggle");
+  });
   createWindow();
   createTray();
   registerShortcut();
@@ -358,5 +372,5 @@ app.whenReady().then(async () => {
   sysTick(); claudeTick(); gpuTick(); netTick();
   setInterval(monitorLoop, 1000);
 });
-app.on("will-quit", () => { ventanas.stop(); contadores.stop(); globalShortcut.unregisterAll(); for (const t of terms.values()) { try { t.p.kill(); } catch { /* ya cerrado */ } } });
+app.on("will-quit", () => { teclawin.stop(); ventanas.stop(); contadores.stop(); globalShortcut.unregisterAll(); for (const t of terms.values()) { try { t.p.kill(); } catch { /* ya cerrado */ } } });
 app.on("window-all-closed", () => { /* sigue en la bandeja */ });
