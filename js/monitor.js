@@ -250,17 +250,17 @@
   // Diseño «órbitas»: cada límite es una órbita alrededor de una estrella.
   // El arco es lo gastado (se ilumina hacia su punta, como un cometa); la bolita hueca es el tiempo
   // que ha pasado de la ventana. Si la punta adelanta a la bolita, se gasta más rápido de lo que pasa
-  // el tiempo. Un punto cada 20 %.
+  // el tiempo. Puntos: uno por día en la semanal (7) y uno por hora en la de 5 h (5).
   const LIMITS = [
-    { k: "weekly", label: "Semanal", ring: 1, step: 86400e3 },
-    { k: "session", label: "5 horas", ring: 0.6, step: 3600e3 },
+    { k: "weekly", label: "Semanal", ring: 1, ticks: 7 },
+    { k: "session", label: "5 horas", ring: 0.6, ticks: 5 },
   ];
   limitsEl.innerHTML = `
     <div class="orbits">
       <canvas class="orbit-cv" aria-hidden="true"></canvas>
       <div class="orbit-info"></div>
     </div>
-    <p class="orbit-key"><span class="k-arc"></span>gastado <span class="k-dot"></span>tiempo pasado <span class="k-tick"></span>20 %</p>`;
+    <p class="orbit-key"><span class="k-arc"></span>gastado <span class="k-dot"></span>tiempo pasado <span class="k-tick"></span>1 día · 1 h</p>`;
   const orbitCv = limitsEl.querySelector(".orbit-cv"), info = limitsEl.querySelector(".orbit-info");
   LIMITS.forEach(L => {
     const d = document.createElement("div"); d.className = "oi";
@@ -321,11 +321,11 @@
       L.shownT += ((L.elapsed || 0) - L.shownT) * k;
       const col = colorFor(L.level || "");
 
-      // órbita y un punto cada 20 % (el de arriba es el 0 % / 100 %)
+      // órbita y un punto por día (semanal) o por hora (5 h); el de arriba es el reinicio
       g.strokeStyle = ink(light ? 0.13 : 0.16); g.lineWidth = 1;
       g.beginPath(); g.arc(cx, cy, r, 0, TAU); g.stroke();
-      for (let i = 0; i < 5; i++) {
-        const a = TOP + i / 5 * TAU, done = L.shown >= i / 5;
+      for (let i = 0; i < L.ticks; i++) {
+        const a = TOP + i / L.ticks * TAU, done = L.shown >= i / L.ticks;
         g.fillStyle = ink(done ? (light ? 0.55 : 0.6) : (light ? 0.28 : 0.3));
         g.beginPath(); g.arc(cx + Math.cos(a) * r, cy + Math.sin(a) * r, i === 0 ? 1.6 : 1.3, 0, TAU); g.fill();
       }
