@@ -27,5 +27,6 @@ Las sesiones reales están en `~/.claude/projects/<carpeta>/<id>.jsonl`; un scri
 - **Estrellas:** el tamaño crece con los mensajes; las sesiones largas tienen picos de difracción (oscuro) o cruz de carta (claro); las activas estos días laten.
 - **Tipografía:** todo en Martian Mono, una fuente de terminal: estrecha para títulos y normal para texto y datos.
 - **Monitor del sistema:** dentro de cada sesión, arriba a la derecha (CPU, RAM, VRAM, disco, red, Claude), como gráficas de área difuminadas sin tarjeta. Se puede plegar. Los datos son simulados hasta que exista `window.CUMULO_SYSTEM.read()` (forma descrita en `js/monitor.js`).
-- **Sesión:** se abre a pantalla completa como una terminal, con una sola línea de entrada al final.
+- **Interfaz:** barra de título y barra de estado como una app de escritorio, inspector acoplado a la derecha (hoja inferior en el móvil). Referencias: Ghostty, Stellarium, Warp y btop.
+- **Sesión:** pantalla completa con pestaña, bloques por intercambio (estilo Warp) y un compositor fijo abajo: adjuntar imágenes (botón, pegar o arrastrar; en el móvil abre cámara o galería) y botón para parar la respuesta (o Esc).
 - **Movimiento:** cámara con vuelos suavizados, zoom anclado al cursor e inercia; todo respeta `prefers-reduced-motion`.

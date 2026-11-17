@@ -94,7 +94,9 @@
   // ── plegar / desplegar (se recuerda en este navegador) ──────
   const toggle = document.getElementById("monToggle");
   let open = true;
-  try { open = localStorage.getItem("cumulo-monitor") !== "0"; } catch (e) { /* sin almacenamiento */ }
+  let saved = null;
+  try { saved = localStorage.getItem("cumulo-monitor"); } catch (e) { /* sin almacenamiento */ }
+  open = saved ? saved !== "0" : !matchMedia("(max-width: 760px)").matches; // en el móvil empieza plegado
   function setOpen(v) {
     open = v;
     el.classList.toggle("folded", !v);
