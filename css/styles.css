@@ -88,6 +88,8 @@ kbd { font-family: var(--font); font-size: 10px; color: var(--muted); border: 1p
 #sky { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
 #sky.dragging { cursor: grabbing; }
 #sky.pointing { cursor: pointer; }
+/* con ratón o trackpad, en el mapa la app dibuja su propia mira (ver app.js) */
+#sky.reticle, #sky.reticle.dragging, #sky.reticle.pointing { cursor: none; }
 
 .chrome { animation: chromeIn .7s var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 70ms + 400ms); }
 @keyframes chromeIn { from { opacity: 0; } }

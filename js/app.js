@@ -266,13 +266,13 @@
   // ── cámara ───────────────────────────────────────────────────
   const cam = { x: 0, y: 0, z: 1 };
   const ZMIN = 0.15, ZMAX = 6;
-  let tween = null, zoomGoal = null, inertia = null;
+  let tween = null, zoomGoal = null, inertia = null, panGoal = null;
   let V = cam; // vista con la que se proyecta lo que se dibuja (la cámara, o la del plano de detrás)
   const toScreen = (x, y) => [(x - V.x) * V.z + W / 2, (y - V.y) * V.z + H / 2];
   const toWorld = (sx, sy) => [(sx - W / 2) / cam.z + cam.x, (sy - H / 2) / cam.z + cam.y];
   const panelW = () => (document.body.classList.contains("panel-open") && W > 760 ? 360 : 0);
 
-  function stopMotion() { tween = null; zoomGoal = null; inertia = null; }
+  function stopMotion() { tween = null; zoomGoal = null; inertia = null; panGoal = null; }
 
   // vuelo con curva suave; si el salto es largo, se aleja un poco a mitad de camino
   function flyTo(x, y, z, opts = {}) {
@@ -303,7 +303,7 @@
   function fitAll() { const b = bounds(); flyTo(b.x, b.y, b.z); }
   // zoom anclado al cursor, suavizado
   function zoomAt(factor, sx, sy) {
-    tween = null; inertia = null;
+    tween = null; inertia = null; panGoal = null;
     const base = zoomGoal ? zoomGoal.z : cam.z;
     const [wx, wy] = toWorld(sx, sy);
     zoomGoal = { z: clamp(base * factor, ZMIN, ZMAX), wx, wy, sx, sy };
@@ -324,6 +324,10 @@
       if (p >= 1) tween = null;
     } else if (zoomGoal) {
       applyZoom(1 - Math.exp(-dt * 14));
+    } else if (panGoal) {
+      const f = 1 - Math.exp(-dt * 16);
+      cam.x += (panGoal.x - cam.x) * f; cam.y += (panGoal.y - cam.y) * f;
+      if (Math.hypot(panGoal.x - cam.x, panGoal.y - cam.y) * cam.z < 0.3) { cam.x = panGoal.x; cam.y = panGoal.y; panGoal = null; }
     } else if (inertia) {
       cam.x += inertia.vx * dt; cam.y += inertia.vy * dt;
       const f = Math.exp(-dt * 5); inertia.vx *= f; inertia.vy *= f;
@@ -418,7 +422,8 @@
         const ex = wcx + (sx - wcx) * w, ey = wcy + (sy - wcy) * w;
         if (dv) { // estela: del punto a su posición estirada, más larga y brillante cuanto más cerca del borde
           const far = Math.min(1, Math.hypot(ex - wcx, ey - wcy) / (Math.hypot(W, H) / 2));
-          ctx.strokeStyle = rgba(th.dust, Math.min(0.85, a * (1.1 + warp * 0.6) * (0.35 + far)));
+          const lineA = easeInOutCubic(clamp(warp / 0.6, 0, 1)); // el punto se convierte en línea poco a poco
+          ctx.strokeStyle = rgba(th.dust, Math.min(0.85, a * lerp(1, (1.1 + warp * 0.6) * (0.35 + far), lineA)));
           ctx.lineWidth = b.r * (1 + warp * 0.35);
           ctx.beginPath(); ctx.moveTo(lerp(sx, ex, 0.08), lerp(sy, ey, 0.08)); ctx.lineTo(ex, ey); ctx.stroke();
           continue;
@@ -436,6 +441,65 @@
     ctx = mainCtx; V = cam;
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     drawDive(now, light);
+    drawAim(now, dt, light);
+  }
+
+  // La mira: cuatro trazos con un hueco en el centro, como el buscador de un telescopio.
+  // Sobre una estrella se abre en los cuatro arcos del visor de selección y se centra en ella;
+  // al arrastrar se encoge; al hacer clic suelta un pulso fino.
+  function drawAim(now, dt, light) {
+    const kk = reduced() ? 1 : 1 - Math.exp(-dt * 16);
+    const show = aim.in && !document.body.classList.contains("session-open");
+    aim.vis += ((show ? 1 : 0) - aim.vis) * (reduced() ? 1 : 1 - Math.exp(-dt * 20));
+    if (aim.vis < 0.01) { aim.pulses.length = 0; return; }
+    const target = hovered && hovered.plane === P ? hovered : null;
+    aim.open += ((target ? 1 : 0) - aim.open) * kk;
+    aim.press += ((drag && drag.moved ? 1 : 0) - aim.press) * kk;
+    // centro: el puntero, atraído hacia la estrella cuando la mira se abre
+    let cx = aim.x, cy = aim.y, rs = 14;
+    if (target) {
+      const [tx, ty] = toScreen(target.x, target.y);
+      aim.sx = tx; aim.sy = ty;
+      rs = target.size * Math.pow(cam.z, 0.55) * 4 + 10;
+    }
+    const m = easeInOutCubic(clamp(aim.open, 0, 1));
+    if (aim.open > 0.001) { cx = lerp(aim.x, aim.sx, m * 0.85); cy = lerp(aim.y, aim.sy, m * 0.85); }
+    const sc = 1 - 0.3 * aim.press;
+    const col = light ? th.ink : [245, 242, 235];
+    const al = aim.vis * (light ? 0.85 : 0.9);
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.strokeStyle = rgba(col, al);
+    // trazos en cruz: se separan al abrirse
+    const r0 = lerp(3.5, rs - 2, m) * sc, r1 = lerp(9, rs + 5, m) * sc;
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    for (let q = 0; q < 4; q++) {
+      const an = q * Math.PI / 2;
+      ctx.moveTo(cx + Math.cos(an) * r0, cy + Math.sin(an) * r0);
+      ctx.lineTo(cx + Math.cos(an) * r1, cy + Math.sin(an) * r1);
+    }
+    ctx.stroke();
+    // arcos del visor (aparecen al abrirse)
+    if (m > 0.01) {
+      const sweep = (Math.PI / 2 - 0.5) * m, rr = rs * sc;
+      ctx.strokeStyle = rgba(col, al * m * 0.8); ctx.lineWidth = 0.9;
+      for (let q = 0; q < 4; q++) {
+        const mid = q * Math.PI / 2 + Math.PI / 4;
+        ctx.beginPath(); ctx.arc(cx, cy, rr, mid - sweep / 2, mid + sweep / 2); ctx.stroke();
+      }
+    }
+    // punto central (se apaga sobre una estrella para no taparla)
+    ctx.fillStyle = rgba(col, al * (1 - m));
+    ctx.beginPath(); ctx.arc(aim.x, aim.y, 0.9, 0, 6.283); ctx.fill();
+    // pulso al hacer clic
+    aim.pulses = aim.pulses.filter(t0 => now - t0 < 450);
+    for (const t0 of aim.pulses) {
+      const q = (now - t0) / 450, e = easeOutCubic(q);
+      ctx.strokeStyle = rgba(col, (1 - q) * 0.55 * aim.vis); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(cx, cy, lerp(r0 + 2, r1 + 14, e), 0, 6.283); ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // ── salto a una estrella (entrar / salir de una sesión) ───────
@@ -458,7 +522,10 @@
   function diveWarp() {
     const p = diveProgress(); if (p === null) return null;
     const [x, y] = diveCenter(p);
-    const k = dive.dir > 0 ? Math.pow(Math.sin(Math.PI * Math.min(1, p * 1.1)), 0.8) * 1.8 : Math.sin(Math.PI * p) * 0.9;
+    // aparecen y se apagan sin tirones; al salir esperan a que la ventana se haya ido y se apagan despacio
+    const env = dive.dir > 0 ? Math.pow(Math.sin(Math.PI * p), 2)
+      : p < 0.22 ? 0 : p < 0.45 ? easeInOutSine((p - 0.22) / 0.23) : 1 - easeInOutSine((p - 0.45) / 0.55);
+    const k = env * (dive.dir > 0 ? 1.8 : 0.9);
     return { x, y, k };
   }
   function drawDive(now, light) {
@@ -768,11 +835,21 @@
   }
 
   let drag = null;
+  // mira propia: sigue al puntero, se abre sobre una estrella y se engancha a ella
+  const aim = { x: 0, y: 0, in: false, open: 0, press: 0, vis: 0, sx: 0, sy: 0, pulses: [] };
+  const trackAim = e => {
+    if (e.pointerType === "touch") { aim.in = false; canvas.classList.remove("reticle"); return; }
+    aim.x = e.clientX; aim.y = e.clientY; aim.in = true; canvas.classList.add("reticle");
+  };
+  canvas.addEventListener("pointerenter", trackAim);
   canvas.addEventListener("pointerdown", e => {
+    trackAim(e);
+    if (e.pointerType !== "touch" && !reduced()) aim.pulses.push(performance.now());
     canvas.setPointerCapture(e.pointerId);
     drag = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y, moved: false, lx: e.clientX, ly: e.clientY, lt: performance.now(), vx: 0, vy: 0 };
   });
   canvas.addEventListener("pointermove", e => {
+    trackAim(e);
     if (drag) {
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       if (!drag.moved && Math.hypot(dx, dy) > 4) {
@@ -802,14 +879,17 @@
     }
     drag = null;
   });
-  canvas.addEventListener("pointerleave", () => { if (!drag) { hovered = null; statusHover(null); } });
+  canvas.addEventListener("pointerleave", () => { aim.in = false; if (!drag) { hovered = null; statusHover(null); } });
   // trackpad: dos dedos desplazan el mapa; pellizcar (o Ctrl + rueda) acerca y aleja
   canvas.addEventListener("wheel", e => {
     e.preventDefault();
     if (e.ctrlKey) { zoomAt(Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY); return; }
     tween = null; zoomGoal = null; inertia = null;
     const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H : 1; // líneas o páginas → píxeles
-    cam.x += e.deltaX * k / cam.z; cam.y += e.deltaY * k / cam.z;
+    // el mapa persigue al gesto con un poco de amortiguado: se mueve libre y fluido en las dos direcciones
+    if (!panGoal || reduced()) panGoal = { x: cam.x, y: cam.y };
+    panGoal.x += e.deltaX * k / cam.z; panGoal.y += e.deltaY * k / cam.z;
+    if (reduced()) { cam.x = panGoal.x; cam.y = panGoal.y; panGoal = null; }
   }, { passive: false });
   function statusHover() {} // la barra inferior ya no muestra lo que hay bajo el cursor
 
@@ -1221,7 +1301,7 @@
       openTimer = 0;
       const from = s && motion ? labelBox(s, cam) : null;
       if (s) flyTo(s.x, s.y, Math.min(ZMAX, Math.max(cam.z, 1.5) * 2.4), { dur: 760, noPanel: true, noDip: true, ease: easeInOutCubic });
-      if (s && motion) dive = { s, t0: performance.now(), dur: 820, dir: 1 };
+      if (s && motion) dive = { s, t0: performance.now(), dur: 1150, dir: 1 };
 
       sessionEl.classList.remove("closing");
       sessionEl.classList.add("open"); sessionEl.setAttribute("aria-hidden", "false");
@@ -1309,7 +1389,7 @@
     );
     sAnim.onfinish = () => { sessionEl.classList.remove("closing"); sessionEl.style.transformOrigin = ""; if (sAnim) sAnim.cancel(); sAnim = null; };
     if (here) {
-      dive = { s, t0: performance.now() + 140, dur: 1000, dir: -1 };
+      dive = { s, t0: performance.now() + 60, dur: 1250, dir: -1 };
       const r = $("sTitle").getBoundingClientRect();
       if (r.width && camBefore) {
         labelHidden = s;
