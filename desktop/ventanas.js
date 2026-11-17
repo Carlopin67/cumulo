@@ -36,6 +36,7 @@ while ($true) {
   try {
     if ($cmd -eq 'list') {
       $fg = [W]::GetForegroundWindow(); $out = New-Object System.Collections.ArrayList
+      $procs = @{}; Get-Process | % { $procs[$_.Id] = $_ }
       $cb = [W+EnumProc]{ param($h, $x)
         if (-not [W]::IsWindowVisible($h)) { return $true }
         if ([W]::GetWindow($h, 4) -ne [IntPtr]::Zero) { return $true }          # tiene dueño (diálogos)
@@ -44,7 +45,7 @@ while ($true) {
         $n = [W]::GetWindowTextLength($h); if ($n -le 0) { return $true }
         $sb = New-Object System.Text.StringBuilder ($n + 1); [void][W]::GetWindowText($h, $sb, $n + 1)
         $wpid = 0; [void][W]::GetWindowThreadProcessId($h, [ref]$wpid)
-        $pr = Get-Process -Id $wpid
+        $pr = $procs[[int]$wpid]
         [void]$out.Add(@{ h = $h.ToInt64(); title = $sb.ToString(); pid = $wpid; name = $pr.ProcessName; path = $pr.Path; min = [W]::IsIconic($h); fg = ($h -eq $fg) })
         return $true }
       [void][W]::EnumWindows($cb, [IntPtr]::Zero)

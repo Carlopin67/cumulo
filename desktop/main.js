@@ -23,6 +23,8 @@ const CLAUDE_DIR = path.join(os.homedir(), ".claude");
 const ESTADO = path.join(CLAUDE_DIR, "cumulo-estado.json");
 const CFG_FILE = () => path.join(app.getPath("userData"), "ajustes.json");
 
+// copia de pruebas: otra carpeta de datos para poder abrirla junto a la instalada
+if (process.env.CUMULO_DEV) app.setPath("userData", app.getPath("userData") + "-dev");
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
 
 let win = null, tray = null;
@@ -94,43 +96,84 @@ function readLive() {
   return { live: out, limits: estado.limits || null, context: estado.context || {} };
 }
 ipcMain.on("live:sync", e => { e.returnValue = readLive(); });
-setInterval(() => send("live", readLive()), 1500);
+setInterval(() => { if (win && win.isVisible() && !win.isMinimized()) send("live", readLive()); }, 2500);
 
 // ── monitor del sistema ────────────────────────────────────────
+// Ligero a propósito: CPU y RAM salen de Node (sin procesos); la gráfica, la red y Claude se leen
+// cada pocos segundos y SOLO mientras el monitor está a la vista (sesión abierta y ventana delante).
 let sys = null, sysStatic = null, claudeProc = { processes: 0, memory: 0 };
+let monitorOn = false, gpu = null, net = { down: 0, up: 0 }, netPrev = null;
+const pending = new Set();
+const once = (k, fn) => { if (pending.has(k)) return; pending.add(k); Promise.resolve().then(fn).catch(() => {}).finally(() => pending.delete(k)); };
+const run = (file, args, ms = 4000) => new Promise((ok, ko) => execFile(file, args, { windowsHide: true, timeout: ms }, (e, out) => e ? ko(e) : ok(out)));
+
 async function sysInit() {
-  const [cpu, mem, gfx, fsz] = await Promise.all([si.cpu(), si.mem(), si.graphics().catch(() => ({ controllers: [] })), si.fsSize().catch(() => [])]);
-  const g = (gfx.controllers || []).sort((a, b) => (b.vram || 0) - (a.vram || 0))[0] || {};
-  const sysDisk = fsz.find(d => /^c:/i.test(d.mount)) || fsz[0] || { used: 0, size: 1 };
-  sysStatic = { cores: cpu.cores, ghz: cpu.speed, ramTotal: mem.total / 1e9, vramTotal: (g.vram || 0) / 1024, disk: sysDisk };
+  const cpus = os.cpus();
+  let disk = { used: 0, size: 1 };
+  try { const fsz = await si.fsSize(); disk = fsz.find(d => /^c:/i.test(d.mount)) || fsz[0] || disk; } catch { /* sin datos */ }
+  let hasNv = false; try { await run("nvidia-smi", ["-L"], 3000); hasNv = true; } catch { /* sin NVIDIA */ }
+  sysStatic = { cores: cpus.length, ghz: (cpus[0] && cpus[0].speed / 1000) || 0, disk, hasNv };
 }
-async function sysTick() {
+let cpuPrev = null;
+function cpuUsage() {
+  const now = os.cpus().reduce((a, c) => { const t = c.times; a.idle += t.idle; a.total += t.user + t.nice + t.sys + t.idle + t.irq; return a; }, { idle: 0, total: 0 });
+  const prev = cpuPrev; cpuPrev = now;
+  if (!prev || now.total === prev.total) return 0;
+  return Math.max(0, Math.min(100, 100 * (1 - (now.idle - prev.idle) / (now.total - prev.total))));
+}
+function gpuTick() {
+  if (!sysStatic || !sysStatic.hasNv) return;
+  once("gpu", async () => {
+    const out = await run("nvidia-smi", ["--query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu", "--format=csv,noheader,nounits"]);
+    const [used, total, util, temp] = out.split(/\r?\n/)[0].split(",").map(x => parseFloat(x));
+    gpu = { used: used / 1024, total: total / 1024, gpuUsage: util || 0, temp: temp || 0 };
+  });
+}
+function netTick() {
+  once("net", async () => {
+    const out = await run("netstat", ["-e"]);
+    const m = /(?:Bytes|Bytes recibidos)\s+(\d+)\s+(\d+)/i.exec(out) || /\n\S[^\n]*?\s(\d{4,})\s+(\d{4,})/.exec(out);
+    if (!m) return;
+    const cur = { t: Date.now(), rx: +m[1], tx: +m[2] };
+    if (netPrev) { const dt = (cur.t - netPrev.t) / 1000; net = { down: Math.max(0, (cur.rx - netPrev.rx) / dt / 1e6), up: Math.max(0, (cur.tx - netPrev.tx) / dt / 1e6) }; }
+    netPrev = cur;
+  });
+}
+function diskTick() {
+  once("disk", async () => { const fsz = await si.fsSize(); const d = fsz.find(x => /^c:/i.test(x.mount)) || fsz[0]; if (d) sysStatic.disk = d; });
+}
+function sysTick() {
   if (!sysStatic) return;
-  const [load, mem, temp, net, gfx] = await Promise.all([
-    si.currentLoad(), si.mem(), si.cpuTemperature().catch(() => ({})), si.networkStats().catch(() => []),
-    sysStatic.vramTotal ? si.graphics().catch(() => null) : null,
-  ]);
-  const g = gfx && (gfx.controllers || []).sort((a, b) => (b.vram || 0) - (a.vram || 0))[0];
-  const down = net.reduce((a, n) => a + Math.max(0, n.rx_sec || 0), 0) / 1e6;
-  const up = net.reduce((a, n) => a + Math.max(0, n.tx_sec || 0), 0) / 1e6;
+  const total = os.totalmem(), free = os.freemem();
+  const g = gpu || { used: 0, total: 1, gpuUsage: 0, temp: 0 };
   sys = {
-    cpu: { usage: load.currentLoad || 0, cores: sysStatic.cores, ghz: sysStatic.ghz, temp: temp.main || 0 },
-    ram: { used: (mem.total - mem.available) / 1e9, total: mem.total / 1e9 },
-    vram: { used: g && g.memoryUsed ? g.memoryUsed / 1024 : 0, total: sysStatic.vramTotal || 1, gpuUsage: (g && g.utilizationGpu) || 0, temp: (g && g.temperatureGpu) || 0 },
+    cpu: { usage: cpuUsage(), cores: sysStatic.cores, ghz: sysStatic.ghz, temp: 0 },
+    ram: { used: (total - free) / 1e9, total: total / 1e9 },
+    vram: g,
     disk: { used: sysStatic.disk.used / 1e9, total: sysStatic.disk.size / 1e9, read: 0, write: 0 },
-    net: { down, up },
+    net,
     claude: claudeProc,
   };
   send("sys", sys);
 }
-// procesos de Claude: más lento, cada 5 s
+// procesos de Claude
 function claudeTick() {
-  execFile("tasklist", ["/fi", "imagename eq claude.exe", "/fo", "csv", "/nh"], { windowsHide: true }, (err, out) => {
-    if (err) return;
+  once("claude", async () => {
+    const out = await run("tasklist", ["/fi", "imagename eq claude.exe", "/fo", "csv", "/nh"]);
     const rows = out.split(/\r?\n/).filter(l => l.startsWith('"claude.exe"'));
     const kb = rows.reduce((a, l) => a + (parseInt(l.split('","')[4].replace(/\D/g, ""), 10) || 0), 0);
     claudeProc = { processes: rows.length, memory: kb / 1e6 };
   });
+}
+ipcMain.on("monitor:active", (_e, v) => { monitorOn = !!v; });
+let tickN = 0;
+function monitorLoop() {
+  tickN++;
+  if (!monitorOn || !win || !win.isVisible() || win.isMinimized()) return; // nadie lo mira: no se gasta nada
+  sysTick();
+  if (tickN % 3 === 0) { gpuTick(); netTick(); }
+  if (tickN % 6 === 0) claudeTick();
+  if (tickN % 120 === 0) diskTick();
 }
 ipcMain.on("sys:sync", e => { e.returnValue = sys; });
 
@@ -308,8 +351,8 @@ app.whenReady().then(async () => {
   createTray();
   registerShortcut();
   await sysInit().catch(() => {});
-  sysTick(); setInterval(() => sysTick().catch(() => {}), 1000);
-  claudeTick(); setInterval(claudeTick, 5000);
+  sysTick(); claudeTick(); gpuTick(); netTick();
+  setInterval(monitorLoop, 1000);
 });
 app.on("will-quit", () => { ventanas.stop(); globalShortcut.unregisterAll(); for (const t of terms.values()) { try { t.p.kill(); } catch { /* ya cerrado */ } } });
 app.on("window-all-closed", () => { /* sigue en la bandeja */ });

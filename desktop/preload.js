@@ -76,6 +76,7 @@ contextBridge.exposeInMainWorld("cumuloDesktop", {
   isFullscreen: () => ipcRenderer.sendSync("win:sync"),
   onWindowState: f => { ipcRenderer.on("win:state", (_e, v) => f(v)); },
   onPalette: f => { listeners.palette.add(f); },
+  monitorActive: v => ipcRenderer.send("monitor:active", v),
   isShell: ipcRenderer.sendSync("app:shell"),
   windows: () => ipcRenderer.invoke("win:list"),
   winFocus: h => ipcRenderer.invoke("win:focus", h),

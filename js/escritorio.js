@@ -328,6 +328,6 @@
     } catch { /* sin datos esta vez */ }
     busy = false;
   }
-  tick(); setInterval(tick, 2000);
+  tick(); setInterval(tick, 3000);
   window.addEventListener("focus", tick);
 })();

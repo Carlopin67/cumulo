@@ -488,8 +488,11 @@
   window.cumuloMonitor.setSession(null);
 
   const sessionEl = document.getElementById("session");
-  let last = 0;
+  let last = 0, lastDraw = 0;
   function loop(now) {
+    requestAnimationFrame(loop);
+    if (now - lastDraw < (document.hasFocus() ? 50 : 500)) return;
+    lastDraw = now;
     const inSession = sessionEl && (sessionEl.classList.contains("open") || sessionEl.classList.contains("closing"));
     if (inSession) drawOrbits(now);
     const visible = open && inSession;
@@ -500,12 +503,15 @@
       ROWS.forEach(r => drawSpark(r, slide));
     }
     last = now;
-    requestAnimationFrame(loop);
   }
 
   // historia inicial para que las gráficas no empiecen vacías
   for (let i = 0; i < HIST - 1; i++) { try { push(source.read()); } catch (e) { break; } }
   tick(); readLimits();
-  setInterval(() => { if (!document.hidden) { tick(); readLimits(); } }, 1000);
+  setInterval(() => {
+    const inSession = sessionEl && sessionEl.classList.contains("open");
+    if (window.cumuloDesktop) window.cumuloDesktop.monitorActive(!!(inSession && open && document.hasFocus()));
+    if (!document.hidden) { tick(); readLimits(); }
+  }, 1000);
   requestAnimationFrame(loop);
 })();

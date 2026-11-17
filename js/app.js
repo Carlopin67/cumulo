@@ -196,7 +196,7 @@
   let W = 0, H = 0, DPR = 1;
 
   function resize() {
-    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    DPR = Math.min(window.devicePixelRatio || 1, 1.5);
     W = window.innerWidth; H = window.innerHeight;
     canvas.width = W * DPR; canvas.height = H * DPR;
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -360,6 +360,8 @@
   // Cada plano se dibuja con su propia vista. El de detrás va a un lienzo aparte que se
   // compone desenfocado, más pequeño y más apagado (profundidad de campo).
   const off = document.createElement("canvas"), offCtx = off.getContext("2d");
+  const softCache = document.createElement("canvas"), softCtx = softCache.getContext("2d");
+  let softAt = 0;
   const depthScale = d => lerp(1, 0.7, d);
   const depthBlur = d => d * 3.2;
   const depthAlpha = d => lerp(1, theme === "light" ? 0.78 : 0.8, d);
@@ -379,13 +381,21 @@
     return [W / 2 + (x - v.x) * v.z * k, H / 2 + (y - v.y) * v.z * k];
   }
 
-  let last = 0;
+  let last = 0, lastInput = 0, busyNow = true;
+  ["pointermove", "pointerdown", "wheel", "keydown", "touchmove"].forEach(ev => window.addEventListener(ev, () => { lastInput = performance.now(); }, { passive: true, capture: true }));
+  const sessionNode = document.getElementById("session");
   function frame(now) {
+    requestAnimationFrame(frame);
+    // con una sesión abierta el mapa queda tapado: no se dibuja (salvo en las animaciones de entrar y salir)
+    const covered = sessionNode && sessionNode.classList.contains("open") && !sessionNode.classList.contains("entering") && !sessionNode.classList.contains("switching") && !dive;
+    busyNow = !!(shift || dive || tween || inertia || zoomGoal || panGoal) || now - lastInput < 1500 || now < 4000;
+    const fps = covered ? 0 : !document.hasFocus() ? 5 : busyNow ? 60 : now - lastInput < 10000 ? 20 : 10; // quieto un rato: 10 fps bastan para el titileo
+    if (!fps) { last = 0; return; }
+    if (last && now - last < 1000 / fps - 3) return;
     const dt = Math.min(0.05, last ? (now - last) / 1000 : 0.016);
     last = now;
     updateCamera(now, dt);
     draw(now, dt);
-    requestAnimationFrame(frame);
   }
 
   function draw(now, dt) {
@@ -566,6 +576,11 @@
     const d = plane.depth, sc = depthScale(d);
     const soft = d > 0.015;
     V = viewOf(plane);
+    if (soft && !shift && !busyNow && softCache.width === W && performance.now() - softAt < 700) {
+      mainCtx.setTransform(1, 0, 0, 1, 0, 0); mainCtx.drawImage(softCache, 0, 0); mainCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      ctx = mainCtx;
+      return;
+    }
     if (soft) {
       if (off.width !== W || off.height !== H) { off.width = W; off.height = H; }
       ctx = offCtx;
@@ -580,10 +595,15 @@
       ctx = mainCtx;
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
       ctx.globalCompositeOperation = "source-over";
-      ctx.filter = `blur(${depthBlur(d).toFixed(2)}px) saturate(${lerp(1, 0.85, d).toFixed(2)})`;
-      ctx.globalAlpha = depthAlpha(d);
-      ctx.drawImage(off, 0, 0, W, H);
-      ctx.filter = "none"; ctx.globalAlpha = 1;
+      // se desenfoca una vez en la caché (a resolución de pantalla) y se pinta desde ahí
+      if (softCache.width !== W * DPR || softCache.height !== H * DPR) { softCache.width = W * DPR; softCache.height = H * DPR; }
+      softCtx.setTransform(DPR, 0, 0, DPR, 0, 0); softCtx.clearRect(0, 0, W, H);
+      softCtx.filter = `blur(${depthBlur(d).toFixed(2)}px) saturate(${lerp(1, 0.85, d).toFixed(2)})`;
+      softCtx.globalAlpha = depthAlpha(d);
+      softCtx.drawImage(off, 0, 0, W, H);
+      softCtx.filter = "none"; softCtx.globalAlpha = 1;
+      softAt = performance.now();
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(softCache, 0, 0); ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     }
   }
 
