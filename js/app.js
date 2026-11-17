@@ -55,10 +55,19 @@
     });
     const projList = [...projects.values()].sort((a, b) => b.sessions.length - a.sessions.length);
     const plane = { kind, sessions, projList, links: [], cam: null, depth: kind === "code" ? 0 : 1 };
+    // radio de cada cúmulo según cuántas estrellas tiene (para colocarlos sin que se pisen)
+    projList.forEach(p => { p.radius = 30 * Math.sqrt(p.sessions.length + 0.4) + 36; });
+    const placed = [];
     projList.forEach((p, i) => {
-      const r = i === 0 ? 0 : 250 * Math.sqrt(i);
+      // espiral áurea: se aleja hasta encontrar un hueco donde no toque a los ya colocados
       const a = i * GA + rot;
-      p.x = Math.cos(a) * r; p.y = Math.sin(a) * r * 0.78;
+      let r = i === 0 ? 0 : 120 + 40 * Math.sqrt(i);
+      for (let tries = 0; tries < 400; tries++) {
+        const x = Math.cos(a) * r, y = Math.sin(a) * r * 0.78;
+        if (placed.every(o => Math.hypot(o.x - x, o.y - y) > o.radius + p.radius + 70)) { p.x = x; p.y = y; break; }
+        r += 12;
+      }
+      placed.push(p);
       p.cd = pal[0][i % pal[0].length]; p.cl = pal[1][i % pal[1].length];
       p.la = 0; p.plane = plane;
       p.sessions.sort((a, b) => new Date(a.started) - new Date(b.started));
@@ -87,6 +96,14 @@
       });
       p.radius = maxR + 20;
     });
+    // hilos del proyecto: cada estrella se une a la más cercana de las anteriores (constelación, no maraña)
+    plane.chain = [];
+    projList.forEach(p => p.sessions.forEach((s, k) => {
+      if (!k) return;
+      let best = null, bd = Infinity;
+      for (let j = 0; j < k; j++) { const o = p.sessions[j], d = Math.hypot(o.x - s.x, o.y - s.y); if (d < bd) { bd = d; best = o; } }
+      plane.chain.push([best, s]);
+    }));
     [...sessions].sort((a, b) => new Date(a.started) - new Date(b.started)).forEach((s, i, arr) => {
       s.delay = (kind === "ask" ? 0.9 : 0.35) + (arr.length > 1 ? i / (arr.length - 1) : 0) * 1.5; // nacen en orden de fecha
     });
@@ -110,7 +127,7 @@
     const l = { a, b, kind, bend: (R() - 0.5) * 0.5, phase: R() * 10, hl: 0, dim: 0 };
     if (a.plane === b.plane) a.plane.links.push(l); else { l.kind = "cross"; crossLinks.push(l); }
   };
-  Object.values(PLANES).forEach(P => P.projList.forEach(p => p.sessions.forEach((s, k) => { if (k > 0) addLink(p.sessions[k - 1], s, "chain"); })));
+  Object.values(PLANES).forEach(P => P.chain.forEach(([a, b]) => addLink(a, b, "chain")));
   ALL.forEach(s => (s.related || []).forEach(id => { const t = byId.get(id); if (t) addLink(s, t, "related"); }));
   ALL.forEach(s => s.links = [...s.plane.links, ...crossLinks].filter(l => l.a === s || l.b === s));
 
