@@ -304,7 +304,7 @@
     g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
     const dt = Math.min(0.1, (now - lastOrbit) / 1000 || 0.016); lastOrbit = now;
     const k = RM.matches ? 1 : 1 - Math.exp(-dt * 3);
-    const t = now / 1000, cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 9;
+    const t = now / 1000, cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 14; // margen para que el brillo no se corte
     const TOP = -Math.PI / 2, TAU = Math.PI * 2;
     const ink = a => withAlpha(colors.ink, a);
 
@@ -330,31 +330,50 @@
         g.beginPath(); g.arc(cx + Math.cos(a) * r, cy + Math.sin(a) * r, i === 0 ? 1.6 : 1.3, 0, TAU); g.fill();
       }
 
-      // arco gastado: se ilumina hacia la punta, como la cola de un cometa
+      // arco gastado: una cinta continua que se afila desde el inicio y se ilumina hacia la punta,
+      // como la cola de un cometa; acaba redondeada y en un brillo suave (sin cortes ni bolita)
       const a1 = TOP + clamp(L.shown, 0, 1) * TAU;
       if (L.shown > 0.002) {
-        const frac = clamp(L.shown, 0.001, 1);
-        const grad = (lo, hi) => {
-          if (!g.createConicGradient) return withAlpha(col, hi);
-          const cg = g.createConicGradient(TOP, cx, cy);
-          cg.addColorStop(0, withAlpha(col, lo)); cg.addColorStop(frac, withAlpha(col, hi));
-          cg.addColorStop(Math.min(1, frac + 0.0001), withAlpha(col, 0)); cg.addColorStop(1, withAlpha(col, 0));
-          return cg;
+        const span = a1 - TOP, frac = clamp(L.shown, 0.001, 1);
+        const N = Math.max(12, Math.ceil(span / TAU * 120));
+        const ribbon = (w0, w1, lo, hi) => {
+          let fill = withAlpha(col, hi);
+          if (g.createConicGradient) {
+            fill = g.createConicGradient(TOP, cx, cy);
+            fill.addColorStop(0, withAlpha(col, lo)); fill.addColorStop(frac, withAlpha(col, hi));
+            fill.addColorStop(Math.min(1, frac + 0.02), withAlpha(col, hi)); fill.addColorStop(1, withAlpha(col, lo));
+          }
+          const hw = f => (w0 + (w1 - w0) * f * f) / 2;
+          g.beginPath();
+          for (let k = 0; k <= N; k++) {
+            const a = TOP + span * k / N, rr = r + hw(k / N);
+            k ? g.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr) : g.moveTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+          }
+          const ex = cx + Math.cos(a1) * r, ey = cy + Math.sin(a1) * r;
+          g.arc(ex, ey, hw(1), a1, a1 + Math.PI, false); // punta redondeada
+          for (let k = N; k >= 0; k--) {
+            const a = TOP + span * k / N, rr = r - hw(k / N);
+            g.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+          }
+          g.closePath(); g.fillStyle = fill; g.fill();
         };
-        g.lineCap = "butt";
-        g.strokeStyle = grad(0, light ? 0.16 : 0.28); g.lineWidth = 8;
-        g.beginPath(); g.arc(cx, cy, r, TOP, a1); g.stroke();
-        g.strokeStyle = grad(light ? 0.18 : 0.12, 1); g.lineWidth = 2;
-        g.beginPath(); g.arc(cx, cy, r, TOP, a1); g.stroke();
+        ribbon(0.5, 9, 0, light ? 0.13 : 0.2);                       // halo
+        ribbon(0.3, 2.4, light ? 0.12 : 0.08, light ? 0.95 : 1);     // línea
 
-        // punta: solo un haz de luz (sin bolita) que marca hasta dónde llega el uso
+        // haz de luz en la punta: brillo difuso que nace de la línea, sin bolita
+        const pulse = 0.5 + 0.5 * Math.sin(t * 2.6 + L.ring * 2);
         const hx = cx + Math.cos(a1) * r, hy = cy + Math.sin(a1) * r;
-        const pulse = 0.12 * Math.sin(t * 2.6 + L.ring * 2);
-        const hg = g.createRadialGradient(hx, hy, 0, hx, hy, 12);
-        hg.addColorStop(0, withAlpha(col, (light ? 0.38 : 0.75) + pulse));
-        hg.addColorStop(0.35, withAlpha(col, light ? 0.14 : 0.25));
+        const glowR = 11 + pulse * 2;
+        const hg = g.createRadialGradient(hx, hy, 0, hx, hy, glowR);
+        hg.addColorStop(0, withAlpha(col, light ? 0.2 : 0.5));
+        hg.addColorStop(0.3, withAlpha(col, light ? 0.07 : 0.2));
         hg.addColorStop(1, withAlpha(col, 0));
-        g.fillStyle = hg; g.fillRect(hx - 13, hy - 13, 26, 26);
+        g.fillStyle = hg; g.beginPath(); g.arc(hx, hy, glowR, 0, TAU); g.fill();
+        if (!light) {                                // núcleo de luz casi blanco, muy pequeño y difuso
+          const core = g.createRadialGradient(hx, hy, 0, hx, hy, 3.2);
+          core.addColorStop(0, `rgba(255,255,255,${0.75 + pulse * 0.2})`); core.addColorStop(1, "rgba(255,255,255,0)");
+          g.fillStyle = core; g.beginPath(); g.arc(hx, hy, 3.2, 0, TAU); g.fill();
+        }
       }
 
       // planeta (bolita hueca): tiempo pasado de la ventana
