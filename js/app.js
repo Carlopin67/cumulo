@@ -3,12 +3,14 @@
 (() => {
   "use strict";
 
-  const SESSIONS = ((window.CUMULO_DATA && window.CUMULO_DATA.sessions) || []).map(s => ({ ...s }));
-  const byId = new Map(SESSIONS.map(s => [s.id, s]));
+  const DATA = window.CUMULO_DATA || {};
 
   // Colores por proyecto. Oscuro: temperaturas de estrellas reales. Claro: tintas de atlas impreso.
   const PAL_DARK = ["#9fbaff", "#ffd29a", "#cddaff", "#ffae78", "#efeaff", "#ffe2bd", "#8fa9f2", "#ffc08a"];
   const PAL_LIGHT = ["#3d6bff", "#ff9a2e", "#6f8cff", "#ff6a3a", "#8a6cff", "#ffb23e", "#2f7dff", "#ff7f45"];
+  // El plano Ask usa otra gama (verdes de nebulosa y violetas) para no confundirse con las sesiones.
+  const ASK_DARK = ["#8ff0d6", "#c9b6ff", "#9fdcff", "#f3b3e6", "#b8f59a", "#a7c4ff"];
+  const ASK_LIGHT = ["#0fa888", "#7c4dff", "#1590d6", "#d23aa6", "#4f9e1c", "#3f63e8"];
 
   const FONT_DISPLAY = "'Martian Mono', ui-monospace, monospace";
   const FONT_MONO = "'Martian Mono', ui-monospace, monospace";
@@ -37,62 +39,84 @@
   const RM = matchMedia("(prefers-reduced-motion: reduce)");
   const reduced = () => RM.matches;
 
-  // ── disposición del cúmulo ──────────────────────────────────
-  const projects = new Map();
-  SESSIONS.forEach(s => {
-    if (!projects.has(s.project)) projects.set(s.project, { path: s.project, name: s.projectName || folderName(s.project), sessions: [] });
-    projects.get(s.project).sessions.push(s);
-  });
-  const projList = [...projects.values()].sort((a, b) => b.sessions.length - a.sessions.length);
+  // ── disposición: dos planos, uno por modo ───────────────────
+  // «code»: sesiones de Claude Code (primer plano). «ask»: chats del modo Ask (detrás).
   const GA = Math.PI * (3 - Math.sqrt(5)); // ángulo áureo
-
-  projList.forEach((p, i) => {
-    const r = i === 0 ? 0 : 250 * Math.sqrt(i);
-    const a = i * GA + 0.7;
-    p.x = Math.cos(a) * r; p.y = Math.sin(a) * r * 0.78;
-    p.cd = PAL_DARK[i % PAL_DARK.length]; p.cl = PAL_LIGHT[i % PAL_LIGHT.length];
-    p.la = 0;
-    p.sessions.sort((a, b) => new Date(a.started) - new Date(b.started));
-    const R = rng(hash(p.path));
-    let maxR = 0;
-    p.sessions.forEach((s, k) => {
-      const rr = 30 * Math.sqrt(k + 0.4) + R() * 16;
-      const aa = k * GA + R() * 0.9;
-      s.x = p.x + Math.cos(aa) * rr; s.y = p.y + Math.sin(aa) * rr;
-      s.proj = p;
-      const lm = Math.log2(1 + (s.messages || 1));
-      s.size = 1.3 + lm * 0.5;
-      s.spike = clamp((lm - 4.3) / 2.2, 0, 1); // las sesiones largas tienen picos de difracción
-      s.twinkle = R() * Math.PI * 2;
-      s.pulsePhase = R() * 4;
-      maxR = Math.max(maxR, rr);
-    });
-    p.radius = maxR + 20;
-  });
-
   const now0 = Date.now();
-  [...SESSIONS].sort((a, b) => new Date(a.started) - new Date(b.started)).forEach((s, i, arr) => {
-    s.delay = 0.35 + (arr.length > 1 ? i / (arr.length - 1) : 0) * 1.5; // nacen en orden de fecha
-  });
-  SESSIONS.forEach(s => {
-    const age = Math.max(0, (now0 - new Date(s.lastActive || s.started)) / 86400000);
-    s.glow = 0.45 + 0.55 * Math.exp(-age / 12); // más reciente = más brillante
-    s.live = age < 3;                           // activa estos días: late
-    s.dim = 0; s.foc = 0; s.la = 0;
-  });
+  const DAY = 86400000;
+
+  function buildPlane(kind, list, pal, rot) {
+    const sessions = list.map(s => ({ ...s }));
+    const projects = new Map();
+    sessions.forEach(s => {
+      const key = s.project || "Sin proyecto";
+      if (!projects.has(key)) projects.set(key, { path: key, name: s.projectName || folderName(key), sessions: [] });
+      projects.get(key).sessions.push(s);
+    });
+    const projList = [...projects.values()].sort((a, b) => b.sessions.length - a.sessions.length);
+    const plane = { kind, sessions, projList, links: [], cam: null, depth: kind === "code" ? 0 : 1 };
+    projList.forEach((p, i) => {
+      const r = i === 0 ? 0 : 250 * Math.sqrt(i);
+      const a = i * GA + rot;
+      p.x = Math.cos(a) * r; p.y = Math.sin(a) * r * 0.78;
+      p.cd = pal[0][i % pal[0].length]; p.cl = pal[1][i % pal[1].length];
+      p.la = 0; p.plane = plane;
+      p.sessions.sort((a, b) => new Date(a.started) - new Date(b.started));
+      const R = rng(hash(kind + p.path));
+      let maxR = 0;
+      p.sessions.forEach((s, k) => {
+        const rr = 30 * Math.sqrt(k + 0.4) + R() * 16;
+        const aa = k * GA + R() * 0.9;
+        s.x = p.x + Math.cos(aa) * rr; s.y = p.y + Math.sin(aa) * rr;
+        s.proj = p; s.plane = plane;
+        // actividad: cuanto más reciente, más brilla, más grande y más titila; las viejas quedan como polvo
+        const age = Math.max(0, (now0 - new Date(s.lastActive || s.started)) / DAY);
+        s.age = age;
+        s.rec = Math.exp(-age / 9);
+        const lm = Math.log2(1 + (s.messages || 1));
+        s.size = (1.3 + lm * 0.5) * (0.72 + 0.4 * s.rec);
+        s.spike = kind === "ask" ? 0 : clamp((lm - 4.3) / 2.2, 0, 1) * (0.35 + 0.65 * s.rec);
+        s.glow = 0.28 + 0.72 * s.rec;
+        s.twAmp = 0.03 + 0.3 * Math.exp(-age / 4); // titileo: casi quieto si es vieja, vivo si es de estos días
+        s.twSp = 0.7 + 1.6 * Math.exp(-age / 4);
+        s.live = age < 3;                           // activa estos días: late
+        s.twinkle = R() * Math.PI * 2;
+        s.pulsePhase = R() * 4;
+        s.dim = 0; s.foc = 0; s.la = 0;
+        maxR = Math.max(maxR, rr);
+      });
+      p.radius = maxR + 20;
+    });
+    [...sessions].sort((a, b) => new Date(a.started) - new Date(b.started)).forEach((s, i, arr) => {
+      s.delay = (kind === "ask" ? 0.9 : 0.35) + (arr.length > 1 ? i / (arr.length - 1) : 0) * 1.5; // nacen en orden de fecha
+    });
+    return plane;
+  }
+  const PLANES = {
+    code: buildPlane("code", DATA.sessions || [], [PAL_DARK, PAL_LIGHT], 0.7),
+    ask: buildPlane("ask", DATA.chats || [], [ASK_DARK, ASK_LIGHT], 2.3),
+  };
+  const ALL = [...PLANES.code.sessions, ...PLANES.ask.sessions];
+  const byId = new Map(ALL.map(s => [s.id, s]));
 
   // ── hilos ────────────────────────────────────────────────────
-  const links = [];
+  // dentro de un plano: cadena por proyecto y relaciones; entre planos: hilos que cruzan la profundidad
+  const crossLinks = [];
   const linkKey = (a, b) => a.id < b.id ? a.id + "|" + b.id : b.id + "|" + a.id;
   const seen = new Set();
   const addLink = (a, b, kind) => {
     const k = linkKey(a, b); if (a === b || seen.has(k)) return; seen.add(k);
     const R = rng(hash(k));
-    links.push({ a, b, kind, bend: (R() - 0.5) * 0.5, phase: R() * 10, hl: 0, dim: 0 });
+    const l = { a, b, kind, bend: (R() - 0.5) * 0.5, phase: R() * 10, hl: 0, dim: 0 };
+    if (a.plane === b.plane) a.plane.links.push(l); else { l.kind = "cross"; crossLinks.push(l); }
   };
-  projList.forEach(p => p.sessions.forEach((s, k) => { if (k > 0) addLink(p.sessions[k - 1], s, "chain"); }));
-  SESSIONS.forEach(s => (s.related || []).forEach(id => { const t = byId.get(id); if (t) addLink(s, t, "related"); }));
-  SESSIONS.forEach(s => s.links = links.filter(l => l.a === s || l.b === s));
+  Object.values(PLANES).forEach(P => P.projList.forEach(p => p.sessions.forEach((s, k) => { if (k > 0) addLink(p.sessions[k - 1], s, "chain"); })));
+  ALL.forEach(s => (s.related || []).forEach(id => { const t = byId.get(id); if (t) addLink(s, t, "related"); }));
+  ALL.forEach(s => s.links = [...s.plane.links, ...crossLinks].filter(l => l.a === s || l.b === s));
+
+  // plano activo: todo lo interactivo (búsqueda, leyenda, selección…) trabaja sobre él
+  let P = PLANES.code, SESSIONS = P.sessions, projList = P.projList, links = P.links;
+  const other = () => (P === PLANES.code ? PLANES.ask : PLANES.code);
 
   // ── tema ─────────────────────────────────────────────────────
   const THEMES = {
@@ -147,7 +171,8 @@
 
   // ── canvas ───────────────────────────────────────────────────
   const canvas = document.getElementById("sky");
-  const ctx = canvas.getContext("2d");
+  let ctx = canvas.getContext("2d");
+  const mainCtx = ctx;
   let W = 0, H = 0, DPR = 1;
 
   function resize() {
@@ -224,7 +249,8 @@
   const cam = { x: 0, y: 0, z: 1 };
   const ZMIN = 0.15, ZMAX = 6;
   let tween = null, zoomGoal = null, inertia = null;
-  const toScreen = (x, y) => [(x - cam.x) * cam.z + W / 2, (y - cam.y) * cam.z + H / 2];
+  let V = cam; // vista con la que se proyecta lo que se dibuja (la cámara, o la del plano de detrás)
+  const toScreen = (x, y) => [(x - V.x) * V.z + W / 2, (y - V.y) * V.z + H / 2];
   const toWorld = (sx, sy) => [(sx - W / 2) / cam.z + cam.x, (sy - H / 2) / cam.z + cam.y];
   const panelW = () => (document.body.classList.contains("panel-open") && W > 760 ? 360 : 0);
 
@@ -246,10 +272,11 @@
       ease: opts.ease || easeInOutCubic,
     };
   }
-  function bounds() {
+  function bounds(plane = P) {
+    const list = plane.sessions;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    SESSIONS.forEach(s => { x0 = Math.min(x0, s.x); y0 = Math.min(y0, s.y); x1 = Math.max(x1, s.x); y1 = Math.max(y1, s.y); });
-    if (!SESSIONS.length) { x0 = y0 = -100; x1 = y1 = 100; }
+    list.forEach(s => { x0 = Math.min(x0, s.x); y0 = Math.min(y0, s.y); x1 = Math.max(x1, s.x); y1 = Math.max(y1, s.y); });
+    if (!list.length) { x0 = y0 = -100; x1 = y1 = 100; }
     const pw = panelW();
     const z = clamp(Math.min((W - pw - 180) / (x1 - x0 + 120), (H - 180) / (y1 - y0 + 120)), 0.2, 2.2);
     return { x: (x0 + x1) / 2, y: (y0 + y1) / 2, z };
@@ -305,6 +332,28 @@
   let tNow = 0;
 
   // ── dibujo ───────────────────────────────────────────────────
+  // Cada plano se dibuja con su propia vista. El de detrás va a un lienzo aparte que se
+  // compone desenfocado, más pequeño y más apagado (profundidad de campo).
+  const off = document.createElement("canvas"), offCtx = off.getContext("2d");
+  const depthScale = d => lerp(1, 0.58, d);
+  const depthBlur = d => d * 7;
+  const depthAlpha = d => lerp(1, theme === "light" ? 0.55 : 0.45, d);
+  const drift = { x: 0, y: 0 }, lastCam = { x: 0, y: 0, z: 1 }; // paralaje del polvo, continuo al cambiar de plano
+  let shift = null; // transición entre planos en curso
+
+  // vista del plano de detrás: su propia cámara, con paralaje (se mueve menos que la de delante)
+  function viewOf(plane) {
+    if (plane === P) return cam;
+    const c = plane.cam, a = P.anchor || cam;
+    const f = 0.3 * cam.z / c.z;
+    return { x: c.x + (cam.x - a.x) * f, y: c.y + (cam.y - a.y) * f, z: c.z * Math.pow(cam.z / a.z, 0.3) };
+  }
+  // posición en pantalla de un punto de cualquier plano, con su escala de profundidad
+  function project(plane, x, y) {
+    const v = viewOf(plane), k = depthScale(plane.depth);
+    return [W / 2 + (x - v.x) * v.z * k, H / 2 + (y - v.y) * v.z * k];
+  }
+
   let last = 0;
   function frame(now) {
     const dt = Math.min(0.05, last ? (now - last) / 1000 : 0.016);
@@ -320,47 +369,106 @@
     const k = reduced() ? 1 : 1 - Math.exp(-dt * 11);
     const light = theme === "light";
 
+    // cambio de plano: el de delante retrocede y se desenfoca, el de detrás avanza y se enfoca
+    let sw = 0;
+    if (shift) {
+      const p = clamp((now - shift.t0) / shift.dur, 0, 1), e = easeInOutCubic(p);
+      shift.from.depth = lerp(shift.a0, 1, e); shift.to.depth = lerp(shift.b0, 0, e);
+      sw = Math.sin(Math.PI * p);
+      if (p >= 1) shift = null;
+    }
+
+    ctx = mainCtx;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
     ctx.fillStyle = rgba(th.bg, 1); ctx.fillRect(0, 0, W, H);
 
-    // retícula celeste (círculos y meridianos alrededor del centro del cúmulo)
-    ctx.strokeStyle = rgba(th.ink, th.grid); ctx.lineWidth = 0.6;
-    const [ox, oy] = toScreen(0, 0);
-    for (let r = 320; r <= 2240; r += 320) { ctx.beginPath(); ctx.arc(ox, oy, r * cam.z, 0, 6.283); ctx.stroke(); }
-    ctx.beginPath();
-    for (let a = 0; a < 12; a++) {
-      const an = a * Math.PI / 6;
-      ctx.moveTo(ox + Math.cos(an) * 320 * cam.z, oy + Math.sin(an) * 320 * cam.z);
-      ctx.lineTo(ox + Math.cos(an) * 2240 * cam.z, oy + Math.sin(an) * 2240 * cam.z);
-    }
-    ctx.stroke();
-
-    // polvo con paralaje
+    // polvo con paralaje; durante el cambio de plano se abre hacia los bordes, como al avanzar
+    drift.x += (cam.x - lastCam.x) * cam.z; drift.y += (cam.y - lastCam.y) * cam.z;
+    lastCam.x = cam.x; lastCam.y = cam.y; lastCam.z = cam.z;
     for (const b of dust) {
-      const sx = ((b.x - cam.x * b.d * cam.z) % W + W) % W;
-      const sy = ((b.y - cam.y * b.d * cam.z) % H + H) % H;
+      let sx = ((b.x - drift.x * b.d) % W + W) % W;
+      let sy = ((b.y - drift.y * b.d) % H + H) % H;
+      if (sw) { const w = 1 + sw * b.d * 0.6; sx = W / 2 + (sx - W / 2) * w; sy = H / 2 + (sy - H / 2) * w; }
       const a = b.a * th.dustA * (0.7 + 0.3 * Math.sin(t * b.sp + b.tw));
       ctx.fillStyle = rgba(th.dust, a);
       ctx.fillRect(sx, sy, b.r * 1.3, b.r * 1.3);
     }
 
-    const focus = selected || hovered;
+    const [back, front] = [PLANES.code, PLANES.ask].sort((a, b) => b.depth - a.depth);
+    renderPlane(back, t, dt, k, light);
+    drawCross(t, k, light);
+    renderPlane(front, t, dt, k, light);
+    ctx = mainCtx; V = cam;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+
+  function renderPlane(plane, t, dt, k, light) {
+    const d = plane.depth, sc = depthScale(d);
+    const soft = d > 0.015;
+    V = viewOf(plane);
+    if (soft) {
+      if (off.width !== W || off.height !== H) { off.width = W; off.height = H; }
+      ctx = offCtx;
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
+      ctx.setTransform(sc, 0, 0, sc, W / 2 * (1 - sc), H / 2 * (1 - sc));
+    } else {
+      ctx = mainCtx;
+      ctx.setTransform(DPR * sc, 0, 0, DPR * sc, DPR * W / 2 * (1 - sc), DPR * H / 2 * (1 - sc));
+    }
+    drawPlane(plane, d, sc, t, dt, k, light);
+    if (soft) {
+      ctx = mainCtx;
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.filter = `blur(${depthBlur(d).toFixed(2)}px) saturate(${lerp(1, 0.7, d).toFixed(2)})`;
+      ctx.globalAlpha = depthAlpha(d);
+      ctx.drawImage(off, 0, 0, W, H);
+      ctx.filter = "none"; ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawPlane(plane, d, sc, t, dt, k, light) {
+    const active = plane === P;
+    const near = 1 - d; // 1 delante, 0 detrás
+    const list = plane.sessions;
+    const focus = active ? (selected || hovered) : null;
+    const hp = active ? hoverProject : null;
+    const q = active ? query : "";
     const lit = focus ? new Set(focus.links.flatMap(l => [l.a, l.b])) : null;
+    // lo que el plano tiene visible (en coordenadas antes de la escala de profundidad)
+    const mx = (W / 2 + 140) / sc, my = (H / 2 + 140) / sc;
+    const x0 = W / 2 - mx, x1 = W / 2 + mx, y0 = H / 2 - my, y1 = H / 2 + my;
+
+    // retícula celeste: solo la del plano que está delante
+    if (near > 0.02) {
+      ctx.strokeStyle = rgba(th.ink, th.grid * near * near); ctx.lineWidth = 0.6;
+      const [ox, oy] = toScreen(0, 0);
+      for (let r = 320; r <= 2240; r += 320) { ctx.beginPath(); ctx.arc(ox, oy, r * V.z, 0, 6.283); ctx.stroke(); }
+      ctx.beginPath();
+      for (let a = 0; a < 12; a++) {
+        const an = a * Math.PI / 6;
+        ctx.moveTo(ox + Math.cos(an) * 320 * V.z, oy + Math.sin(an) * 320 * V.z);
+        ctx.lineTo(ox + Math.cos(an) * 2240 * V.z, oy + Math.sin(an) * 2240 * V.z);
+      }
+      ctx.stroke();
+    }
 
     // estados animados
-    for (const s of SESSIONS) {
-      const dimT = (query && !matches(s)) || (lit && !lit.has(s)) || (hoverProject && s.proj !== hoverProject) ? 1 : 0;
+    const kk = reduced() ? 1 : 1 - Math.exp(-dt * 14);
+    for (const s of list) {
+      const dimT = (q && !matches(s)) || (lit && !lit.has(s)) || (hp && s.proj !== hp) ? 1 : 0;
       s.dim += (dimT - s.dim) * k;
-      s.foc += ((s === focus ? 1 : 0) - s.foc) * k;
-      s.la += ((s === hovered || s === selected ? 1 : 0) - s.la) * (reduced() ? 1 : 1 - Math.exp(-dt * 14));
+      s.foc += ((s === focus || (!active && lit0 && lit0.has(s)) ? 1 : 0) - s.foc) * k;
+      s.la += ((active && (s === hovered || s === selected) ? 1 : 0) - s.la) * kk;
     }
 
     // hilos
     ctx.lineCap = "round";
-    for (const l of links) {
+    for (const l of plane.links) {
       const on = focus && (l.a === focus || l.b === focus);
-      const projOn = hoverProject && l.a.proj === hoverProject && l.b.proj === hoverProject;
-      const dimT = (query && !(matches(l.a) && matches(l.b))) || (focus && !on && !projOn) || (hoverProject && !projOn) ? 1 : 0;
+      const projOn = hp && l.a.proj === hp && l.b.proj === hp;
+      const dimT = (q && !(matches(l.a) && matches(l.b))) || (focus && !on && !projOn) || (hp && !projOn) ? 1 : 0;
       l.hl += ((on || projOn ? 1 : 0) - l.hl) * k;
       l.dim += (dimT - l.dim) * k;
 
@@ -397,15 +505,15 @@
     ctx.setLineDash([]);
 
     // nombres de proyectos
-    const labelZ = clamp((cam.z - 0.35) * 1.6, 0, 0.6);
+    const labelZ = clamp((V.z - 0.35) * 1.6, 0, 0.6);
     const labelIntro = reduced() ? 1 : easeOutCubic(clamp((t - introT0 - 1.4) / 1, 0, 1));
     ctx.font = `500 9px ${FONT_MONO}`;
     if ("letterSpacing" in ctx) ctx.letterSpacing = "1.6px";
     ctx.textAlign = "center";
-    for (const p of projList) {
-      const target = hoverProject === p ? 1 : (hoverProject || (focus && focus.proj !== p) ? labelZ * 0.35 : labelZ);
+    for (const p of plane.projList) {
+      const target = hp === p ? 1 : (hp || (focus && focus.proj !== p) ? labelZ * 0.35 : labelZ);
       p.la += (target - p.la) * k;
-      const a = p.la * labelIntro;
+      const a = p.la * labelIntro * near * near;
       if (a < 0.01) continue;
       const [sx, sy] = toScreen(p.x, p.y - p.radius);
       ctx.fillStyle = rgba(th.ink, a * (light ? 0.9 : 0.85));
@@ -413,14 +521,17 @@
     }
     if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
 
-    // estrellas (sesiones)
-    const zs = Math.pow(cam.z, 0.55);
-    for (const s of SESSIONS) {
+    // estrellas
+    const zs = Math.pow(V.z, 0.55);
+    const still = reduced();
+    for (const s of list) {
       const [sx, sy] = toScreen(s.x, s.y);
-      if (sx < -140 || sy < -140 || sx > W + 140 || sy > H + 140) continue;
+      if (sx < x0 || sy < y0 || sx > x1 || sy > y1) continue;
       const b = birth(s);
       if (b <= 0) continue;
-      const scint = 0.88 + 0.12 * Math.sin(t * 1.3 + s.twinkle) * Math.sin(t * 0.71 + s.twinkle * 2);
+      // titileo según la actividad: las de estos días centellean, las viejas casi no se mueven
+      const tw = still ? 0 : Math.sin(t * 1.3 * s.twSp + s.twinkle) * Math.sin(t * 0.71 * s.twSp + s.twinkle * 2);
+      const scint = 1 - s.twAmp * 0.5 + s.twAmp * 0.5 * tw;
       const a = s.glow * lerp(1, 0.18, s.dim) * easeOutCubic(b);
       const R = s.size * zs * easeOutBack(b) * (1 + 0.3 * s.foc);
       const color = colorOf(s.proj);
@@ -428,7 +539,7 @@
       drawStar(s, sx, sy, R, a, scint, color, t, light);
 
       // destello de nacimiento
-      if (b < 1 && !reduced()) {
+      if (b < 1 && !still && near > 0.5) {
         ctx.globalCompositeOperation = th.blend;
         ctx.strokeStyle = rgba(light ? th.ink : color, (1 - b) * 0.45);
         ctx.lineWidth = 1;
@@ -438,17 +549,18 @@
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
+    if (!active) return;
 
     // retícula de selección: entra cerrándose sobre la estrella, sale abriéndose
     if (selected && ring.s !== selected) ring = { s: selected, a: ring.s && ring.a > 0.2 ? 0.2 : 0, t0: t };
     ring.a += ((selected && ring.s === selected ? 1 : 0) - ring.a) * (reduced() ? 1 : 1 - Math.exp(-dt * 9));
-    if (ring.s && ring.a > 0.01) {
+    if (ring.s && ring.a > 0.01 && ring.s.plane === plane) {
       const s = ring.s;
       const [sx, sy] = toScreen(s.x, s.y);
       const base = s.size * zs * 4 + 10;
       const rr = base + (1 - ring.a) * 26 + Math.sin(t * 2) * 1;
       const rot = reduced() ? 0 : t * 0.25;
-      ctx.strokeStyle = rgba(th.ink, 0.6 * ring.a); ctx.lineWidth = 0.9;
+      ctx.strokeStyle = rgba(th.ink, 0.6 * ring.a * near); ctx.lineWidth = 0.9;
       for (let q = 0; q < 4; q++) { // cuatro arcos con huecos, como un visor
         const a0 = rot + q * Math.PI / 2 + 0.22, a1 = a0 + Math.PI / 2 - 0.44;
         ctx.beginPath(); ctx.arc(sx, sy, rr, a0, a1); ctx.stroke();
@@ -463,7 +575,7 @@
     }
 
     // etiquetas (aparecen deslizándose)
-    for (const s of SESSIONS) {
+    for (const s of list) {
       if (s.la < 0.01) continue;
       const [sx, sy] = toScreen(s.x, s.y);
       const off = s.size * zs * 4 + 16 + (1 - s.la) * -8;
@@ -471,32 +583,73 @@
       ctx.font = `500 14px ${FONT_DISPLAY}`;
       if ("fontStretch" in ctx) ctx.fontStretch = "ultra-condensed";
       if ("letterSpacing" in ctx) ctx.letterSpacing = "-0.6px";
-      ctx.fillStyle = rgba(th.ink, 0.96 * s.la);
+      ctx.fillStyle = rgba(th.ink, 0.96 * s.la * near);
       ctx.fillText(s.title, sx + off, sy + 1);
       if ("fontStretch" in ctx) ctx.fontStretch = "normal";
       if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
       ctx.font = `400 9.5px ${FONT_MONO}`;
-      ctx.fillStyle = rgba(th.muted, 0.95 * s.la);
+      ctx.fillStyle = rgba(th.muted, 0.95 * s.la * near);
       ctx.fillText(`${s.proj.name} · ${ago(s.lastActive)} · ${s.messages} mensajes`, sx + off, sy + 17);
     }
   }
 
+  // hilos entre planos: unen un chat con la sesión de Code relacionada a través de la profundidad
+  let lit0 = null; // estrellas del otro plano unidas a la que tienes enfocada
+  function drawCross(t, k, light) {
+    ctx = mainCtx; V = cam;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    const focus = selected || hovered;
+    lit0 = focus ? new Set(focus.links.filter(l => l.kind === "cross").flatMap(l => [l.a, l.b])) : null;
+    ctx.lineCap = "round";
+    for (const l of crossLinks) {
+      const on = focus && (l.a === focus || l.b === focus);
+      l.hl += ((on ? 1 : 0) - l.hl) * k;
+      const grow = reduced() || introT0 === null ? 1 : clamp((t - introT0 - Math.max(l.a.delay, l.b.delay) - 0.6) / 0.9, 0, 1);
+      if (grow <= 0) continue;
+      // el extremo de delante es el más nítido; hacia el fondo se apaga
+      const [fr, bk] = l.a.plane.depth <= l.b.plane.depth ? [l.a, l.b] : [l.b, l.a];
+      const [fx, fy] = project(fr.plane, fr.x, fr.y), [bx, by] = project(bk.plane, bk.x, bk.y);
+      if (Math.max(fx, bx) < -50 || Math.min(fx, bx) > W + 50 || Math.max(fy, by) < -50 || Math.min(fy, by) > H + 50) continue;
+      const a = lerp(light ? 0.16 : 0.12, light ? 0.75 : 0.65, l.hl) * easeOutCubic(grow);
+      const g = ctx.createLinearGradient(fx, fy, bx, by);
+      g.addColorStop(0, rgba(th.relatedLink, a)); g.addColorStop(1, rgba(th.relatedLink, a * lerp(0.12, 0.4, l.hl)));
+      ctx.strokeStyle = g; ctx.lineWidth = lerp(0.7, 1.1, l.hl);
+      ctx.setLineDash([1.5, 5]);
+      ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(lerp(fx, bx, grow), lerp(fy, by, grow)); ctx.stroke();
+      // una chispa sube de vez en cuando desde el fondo hacia delante
+      const cyc = (t * 0.1 + l.phase) % 5;
+      if (cyc < 1 && grow >= 1) {
+        const e = easeInOutCubic(cyc);
+        ctx.fillStyle = rgba(th.relatedLink, Math.sin(cyc * Math.PI) * lerp(0.5, 0.95, l.hl));
+        ctx.beginPath(); ctx.arc(lerp(bx, fx, e), lerp(by, fy, e), lerp(0.6, 1.4, e), 0, 6.283); ctx.fill();
+      }
+    }
+    ctx.setLineDash([]);
+  }
+
   // Estrella fotografiada: corona, picos de difracción y núcleo incandescente.
   // En oscuro la luz se suma ("lighter"); en claro se tiñe sobre el blanco ("multiply").
+  // Los chats de Ask son más redondos: sin picos, núcleo más ancho y un anillo fino.
   function drawStar(s, sx, sy, R, a, scint, color, t, light) {
+    const ask = s.plane.kind === "ask";
     ctx.globalCompositeOperation = th.blend;
-    const g = R * 11;
+    const g = R * (7 + 4 * s.rec);
     ctx.globalAlpha = a * scint;
     ctx.drawImage(halo(color, light), sx - g, sy - g, g * 2, g * 2);
 
-    const sp = clamp(s.spike + s.foc * 0.7, 0, 1.4);
+    const sp = ask ? 0 : clamp(s.spike + s.foc * 0.7, 0, 1.4);
     if (sp > 0.02) {
       const L = R * (5 + 9 * sp) * (0.92 + 0.08 * scint);
       ctx.globalAlpha = a * Math.min(1, sp) * (light ? 0.7 : 0.85);
       ctx.drawImage(spikes(color, light), sx - L, sy - L, L * 2, L * 2);
     }
+    if (ask) {
+      ctx.globalAlpha = a * (light ? 0.55 : 0.4) * (0.7 + 0.3 * s.rec + 0.3 * s.foc);
+      ctx.strokeStyle = color; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.arc(sx, sy, R * 2.3 + 1.5, 0, 6.283); ctx.stroke();
+    }
 
-    if (s.live && !reduced()) { // las sesiones de estos días laten
+    if (s.live && !reduced()) { // las de estos días laten
       const ph = ((t + s.pulsePhase) % 3.2) / 3.2;
       ctx.globalAlpha = a * (1 - ph) * (light ? 0.5 : 0.35);
       ctx.strokeStyle = color; ctx.lineWidth = 1;
@@ -504,8 +657,8 @@
     }
 
     ctx.globalCompositeOperation = light ? "source-over" : "lighter";
-    const c = Math.max(2.4, R * 1.5);
-    ctx.globalAlpha = Math.min(1, a + 0.25);
+    const c = Math.max(2.4, R * (ask ? 1.8 : 1.5));
+    ctx.globalAlpha = Math.min(1, a + 0.25 * (0.4 + 0.6 * s.rec));
     ctx.drawImage(core(color, light), sx - c, sy - c, c * 2, c * 2);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
@@ -606,19 +759,67 @@
 
   const dotHTML = p => `<span class="dot" style="--cd:${p.cd};--cl:${p.cl}"></span>`;
 
-  // leyenda
+  // leyenda (se rehace al cambiar de plano)
   const legend = document.getElementById("legend");
-  projList.forEach(p => {
-    const b = document.createElement("button");
-    b.innerHTML = `${dotHTML(p)}<span></span><span class="n">${p.sessions.length}</span>`;
-    b.children[1].textContent = p.name;
-    b.onmouseenter = () => { hoverProject = p; };
-    b.onmouseleave = () => { hoverProject = null; };
-    b.onfocus = b.onmouseenter; b.onblur = b.onmouseleave;
-    b.onclick = () => { closePanel(); flyTo(p.x, p.y, clamp(Math.min(W, H) / (p.radius * 3.2), 0.6, 3)); };
-    legend.appendChild(b);
-  });
-  document.getElementById("stats").textContent = `${SESSIONS.length} sesiones · ${projList.length} proyectos · ${links.length} hilos`;
+  function buildLegend(animate) {
+    legend.querySelectorAll("button").forEach(b => b.remove());
+    projList.forEach((p, j) => {
+      const b = document.createElement("button");
+      b.innerHTML = `${dotHTML(p)}<span></span><span class="n">${p.sessions.length}</span>`;
+      b.children[1].textContent = p.name;
+      if (animate) { b.classList.add("in"); b.style.setProperty("--j", j); }
+      b.onmouseenter = () => { hoverProject = p; };
+      b.onmouseleave = () => { hoverProject = null; };
+      b.onfocus = b.onmouseenter; b.onblur = b.onmouseleave;
+      b.onclick = () => { closePanel(); flyTo(p.x, p.y, clamp(Math.min(W, H) / (p.radius * 3.2), 0.6, 3)); };
+      legend.appendChild(b);
+    });
+    const ask = P.kind === "ask";
+    document.getElementById("stats").textContent =
+      `${SESSIONS.length} ${ask ? "chats" : "sesiones"} · ${projList.length} proyectos · ${links.length} hilos`;
+  }
+  buildLegend(false);
+
+  // ── planos: Code delante, Ask detrás (o al revés) ────────────
+  const planeTabs = document.getElementById("planes");
+  const planeInd = planeTabs.querySelector(".planes-ind");
+  const crumb = document.querySelector(".crumb");
+  function placeInd() {
+    const b = planeTabs.querySelector(`[data-plane="${P.kind}"]`);
+    planeInd.style.width = b.offsetWidth + "px";
+    planeInd.style.translate = b.offsetLeft + "px 0";
+  }
+  let legendTimer = 0;
+  function switchPlane(kind) {
+    const next = PLANES[kind];
+    if (!next || next === P) return false;
+    const prev = P;
+    const v = viewOf(next);
+    prev.cam = { x: cam.x, y: cam.y, z: cam.z };
+    stopMotion();
+    cam.x = v.x; cam.y = v.y; cam.z = v.z;
+    next.anchor = { ...cam };
+    lastCam.x = cam.x; lastCam.y = cam.y; lastCam.z = cam.z;
+    P = next; SESSIONS = P.sessions; projList = P.projList; links = P.links;
+    hovered = null; hoverProject = null; statusHover(null);
+    closePanel(); clearSearch();
+    if (reduced()) { prev.depth = 1; next.depth = 0; shift = null; }
+    else shift = { t0: performance.now(), dur: 1150, from: prev, to: next, a0: prev.depth, b0: next.depth };
+
+    const ask = kind === "ask";
+    document.body.dataset.plane = kind;
+    planeTabs.querySelectorAll("[data-plane]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.plane === kind)));
+    placeInd();
+    crumb.textContent = ask ? "claude.ai/chats" : "~/.claude/projects";
+    search.placeholder = ask ? "Buscar chats" : "Buscar sesiones";
+    search.setAttribute("aria-label", search.placeholder);
+    $("newSession").querySelector("span").textContent = ask ? "Nuevo chat" : "Nueva sesión";
+    clearTimeout(legendTimer);
+    if (reduced()) buildLegend(false);
+    else { legend.classList.add("swap"); legendTimer = setTimeout(() => { buildLegend(true); legend.classList.remove("swap"); }, 220); }
+    return true;
+  }
+  planeTabs.querySelectorAll("[data-plane]").forEach(b => b.addEventListener("click", () => switchPlane(b.dataset.plane)));
 
   // panel de sesión
   const $ = id => document.getElementById(id);
@@ -634,13 +835,18 @@
     $("pLast").textContent = ago(s.lastActive);
     $("pMsgs").textContent = s.messages;
     $("pId").textContent = s.id; $("pId").title = s.id;
+    const ask = s.plane.kind === "ask";
+    $("pResume").querySelector("span").textContent = ask ? "Abrir chat" : "Reanudar";
+    $("pCopy").querySelector("span").textContent = copyLabel(s);
+    panel.querySelector(".panel-bar span").textContent = ask ? "Chat" : "Sesión";
     const ul = $("pLinks"); ul.innerHTML = "";
     s.links.forEach(l => {
       const o = l.a === s ? l.b : l.a;
       const li = document.createElement("li"), b = document.createElement("button");
-      b.innerHTML = `${dotHTML(o.proj)}<span class="t"></span><span class="k">${l.kind === "chain" ? "mismo proyecto" : "relacionada"}</span>`;
+      const kind = l.kind === "chain" ? "mismo proyecto" : l.kind === "cross" ? (o.plane.kind === "ask" ? "chat de Ask" : "sesión de Code") : "relacionada";
+      b.innerHTML = `${dotHTML(o.proj)}<span class="t"></span><span class="k">${kind}</span>`;
       b.children[1].textContent = o.title;
-      b.onmouseenter = () => { hovered = o; };
+      b.onmouseenter = () => { if (o.plane === P) hovered = o; };
       b.onmouseleave = () => { hovered = null; };
       b.onclick = () => select(o);
       li.appendChild(b); ul.appendChild(li);
@@ -649,6 +855,7 @@
 
   let swapTimer = 0;
   function select(s) {
+    if (s.plane !== P) switchPlane(s.plane.kind); // un hilo entre planos te lleva al otro plano
     if (s === selected) { flyTo(s.x, s.y, Math.max(cam.z, 1.5)); return; }
     const wasOpen = panel.classList.contains("open");
     selected = s; hovered = null;
@@ -669,8 +876,9 @@
   }
   $("panelClose").onclick = closePanel;
 
-  const resumeCmd = s => `cd "${s.project}" && claude --resume ${s.id}`;
-  function swapLabel(btn, text, back) {
+  const resumeCmd = s => s.plane.kind === "ask" ? `https://claude.ai/chat/${s.id}` : `cd "${s.project}" && claude --resume ${s.id}`;
+  const copyLabel = s => (s && s.plane.kind === "ask") ? "Copiar enlace" : "Copiar orden";
+  function swapLabel(btn, text, back = btn._back || "Copiar orden") {
     const span = btn.querySelector("span");
     btn.classList.add("swapping");
     setTimeout(() => { span.textContent = text; btn.classList.remove("swapping"); }, reduced() ? 0 : 140);
@@ -680,11 +888,12 @@
       setTimeout(() => { span.textContent = back; btn.classList.remove("swapping"); }, reduced() ? 0 : 140);
     }, 1600);
   }
-  async function copy(btn, text) {
-    try { await navigator.clipboard.writeText(text); swapLabel(btn, "Copiada", "Copiar orden"); }
-    catch { swapLabel(btn, "No se pudo copiar", "Copiar orden"); }
+  async function copy(btn, text, label) {
+    btn._back = label;
+    try { await navigator.clipboard.writeText(text); swapLabel(btn, "Copiado"); }
+    catch { swapLabel(btn, "No se pudo copiar"); }
   }
-  $("pCopy").onclick = () => selected && copy($("pCopy"), resumeCmd(selected));
+  $("pCopy").onclick = () => selected && copy($("pCopy"), resumeCmd(selected), copyLabel(selected));
 
   // ── sesión a pantalla completa (simulada) ────────────────────
   // En la versión instalable, aquí se abrirá la terminal real con la sesión.
@@ -733,15 +942,20 @@
     "He mirado la estructura actual. Hay dos sitios donde conviene hacerlo: en la lógica de datos y en la vista. Empiezo por los datos, que es lo que menos riesgo tiene.",
     "Hecho el primer paso. Antes de seguir, ¿prefieres que lo deje en una rama aparte para que puedas probarlo tranquilo?",
   ];
+  const CHAT_REPLIES = [
+    "Buena pregunta. Te lo explico por partes y con un ejemplo, y si algo no queda claro lo vemos con más calma.",
+    "Aquí tienes una primera versión. La he dejado corta a propósito; dime qué tono prefieres y la ajusto.",
+    "Depende un poco de lo que busques. Te dejo tres opciones con sus pros y contras para que elijas.",
+  ];
   let replyN = 0;
   function respond(b, imgs) {
-    b.el.classList.add("running");
+    b.el.classList.add("running", "reply");
     const id = ++run;
     const thinking = outLine(b.out, "", "thinking");
     thinking.innerHTML = `<span class="spin">✻</span> Pensando…\n`;
     let stopped = false;
     const text = (imgs.length ? `Veo ${imgs.length === 1 ? "la imagen que has adjuntado" : `las ${imgs.length} imágenes que has adjuntado`}. ` : "")
-      + REPLIES[replyN++ % REPLIES.length] + "\n(Simulación: aquí respondería Claude de verdad.)";
+      + (current && current.chat ? CHAT_REPLIES : REPLIES)[replyN++ % REPLIES.length] + "\n(Simulación: aquí respondería Claude de verdad.)";
     const finish = how => {
       if (streaming && streaming.id !== id) return;
       streaming = null; setBusy(false); b.el.classList.remove("running");
@@ -822,6 +1036,16 @@
   sScroll.addEventListener("click", () => { if (!String(window.getSelection())) sInput.focus({ preventScroll: true }); });
 
   async function intro(s, proj, id) {
+    if (current && current.chat) { // un chat se lee como conversación, no como terminal
+      if (s) {
+        const prev = block({ prompt: s.firstPrompt || "", time: fmtDate(s.started) });
+        outLine(prev.out, `… ${Math.max(0, s.messages - 1)} mensajes anteriores · última vez ${ago(s.lastActive)}`, "d");
+      } else {
+        const b = block({ prompt: "" }); b.el.classList.add("note");
+        outLine(b.out, "Nuevo chat. Al terminar aparecerá como una estrella en el plano Ask.", "d");
+      }
+      return;
+    }
     const b = block({ cmd: true, prompt: s ? `claude --resume ${s.id}` : "claude", time: clock() });
     await wait(450); if (id !== run) return;
     if (s) {
@@ -836,13 +1060,17 @@
   }
 
   function openSession(s, origin) {
-    if (window.cumuloMonitor) window.cumuloMonitor.setSession(s);
+    const chat = (s ? s.plane : P).kind === "ask";
+    if (!chat && window.cumuloMonitor) window.cumuloMonitor.setSession(s);
     const proj = s ? s.proj : ((selected && selected.proj) || hoverProject || projList[0]);
-    current = { s, proj };
+    current = { s, proj, chat };
+    sessionEl.classList.toggle("chat", chat);
     $("sProject").innerHTML = proj ? dotHTML(proj) : "";
-    $("sTitle").textContent = s ? s.title : "Nueva sesión";
-    $("sMeta").textContent = proj ? proj.path : "";
+    $("sTitle").textContent = s ? s.title : (chat ? "Nuevo chat" : "Nueva sesión");
+    $("sMeta").textContent = chat ? (proj && proj.name !== "Sin proyecto" ? `Proyecto · ${proj.name}` : "Chat sin proyecto") : (proj ? proj.path : "");
     $("sId").textContent = s ? s.id : "sin guardar todavía";
+    $("sCopy").querySelector("span").textContent = chat ? "Copiar enlace" : "Copiar orden";
+    sInput.placeholder = chat ? "Pregunta a Claude…" : "Escribe a Claude…";
     if (streaming) streaming.stop();
     sLog.innerHTML = ""; sInput.value = ""; autosize();
     attachments = []; sAttach.innerHTML = ""; sAttach.hidden = true; updateSend();
@@ -918,7 +1146,8 @@
   });
   $("sCopy").onclick = () => {
     if (!current) return;
-    copy($("sCopy"), current.s ? resumeCmd(current.s) : `cd "${current.proj ? current.proj.path : "."}" && claude`);
+    if (current.chat) copy($("sCopy"), current.s ? resumeCmd(current.s) : "https://claude.ai/new", "Copiar enlace");
+    else copy($("sCopy"), current.s ? resumeCmd(current.s) : `cd "${current.proj ? current.proj.path : "."}" && claude`, "Copiar orden");
   };
   $("pResume").onclick = () => {
     if (!selected) return;
@@ -937,6 +1166,8 @@
       if (inSession) { if (streaming) streaming.stop(); else closeSession(); }
       else if (document.activeElement === search) clearSearch();
       else closePanel();
+    } else if ((e.key === "1" || e.key === "2") && !inSession && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      switchPlane(e.key === "1" ? "code" : "ask");
     } else if (e.key === "/" && !inSession && document.activeElement !== search) {
       e.preventDefault(); search.focus();
     } else if (e.key === "Enter" && !inSession && selected && e.target === document.body) {
@@ -949,7 +1180,15 @@
 
   // entrada: empieza lejos y se acerca mientras nacen las estrellas
   const b0 = bounds();
+  const ba = bounds(PLANES.ask);
+  PLANES.ask.cam = { x: ba.x, y: ba.y, z: ba.z };
+  PLANES.code.anchor = { x: b0.x, y: b0.y, z: b0.z };
   cam.x = b0.x; cam.y = b0.y; cam.z = b0.z * (reduced() ? 1 : 0.5);
+  lastCam.x = cam.x; lastCam.y = cam.y;
+  document.body.dataset.plane = "code";
+  placeInd();
+  if (document.fonts) document.fonts.ready.then(placeInd);
+  window.addEventListener("resize", placeInd);
   flyTo(b0.x, b0.y, b0.z, { dur: 2600, ease: easeOutQuart, noDip: true });
   requestAnimationFrame(frame);
 })();

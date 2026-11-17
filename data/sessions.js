@@ -63,5 +63,40 @@ window.CUMULO_DATA = {
     { id: "c2d8a4f1-5e7b-4c30-8f96-1d4c7e0a5b81", title: "Copia de seguridad semanal", project: "C:\\Users\\carlos", started: "2026-10-17T10:40:00Z", lastActive: "2026-10-17T11:30:00Z", messages: 27, firstPrompt: "copia mis proyectos a un disco externo cada domingo" },
     { id: "5f3a1e96-7c2d-4b48-9e05-2f6a0c8d4e92", title: "Atajos de teclado", project: "C:\\Users\\carlos", started: "2026-11-01T21:10:00Z", lastActive: "2026-11-01T21:32:00Z", messages: 12, firstPrompt: "quiero abrir la terminal con un atajo" },
     { id: "9e4c7b02-3a8f-4d59-b1c6-7a3e2d9f5ba3", title: "Lanzador de sesiones", project: "C:\\Users\\carlos", started: "2026-11-17T17:00:00Z", lastActive: "2026-11-17T17:30:00Z", messages: 9, firstPrompt: "un lanzador más estético que la terminal, con las sesiones como estrellas", related: ["4f2a91c3-7d1e-4b8a-9c02-1e6b5d3a7f10", "5f3a1e96-7c2d-4b48-9e05-2f6a0c8d4e92"] }
+  ],
+
+  // Chats del modo Ask (claude.ai / app de escritorio): el segundo plano del cielo.
+  // Mismos campos; `project` es el nombre del proyecto de claude.ai (o «Sin proyecto»).
+  // `related` puede apuntar a sesiones de Claude Code: esos hilos cruzan de un plano a otro.
+  chats: [
+    // ── Estudios ───────────────────────────────────────────────
+    { id: "a1c4e7f0-2b5d-4e81-9c3a-6f0b2d5e8a11", title: "Por qué titilan las estrellas", project: "Estudios", started: "2026-10-01T21:30:00Z", lastActive: "2026-10-01T21:52:00Z", messages: 12, firstPrompt: "por qué las estrellas parpadean y los planetas no", related: ["4f2a91c3-7d1e-4b8a-9c02-1e6b5d3a7f10"] },
+    { id: "b2d5f8a1-3c6e-4f92-8d4b-7a1c3e6f9b22", title: "Resumen tema 4 de física", project: "Estudios", started: "2026-10-15T16:10:00Z", lastActive: "2026-10-15T17:05:00Z", messages: 26, firstPrompt: "resúmeme el tema de ondas en una página" },
+    { id: "c3e6a9b2-4d7f-4a03-9e5c-8b2d4f7a0c33", title: "Ejercicios de derivadas", project: "Estudios", started: "2026-10-28T18:00:00Z", lastActive: "2026-10-28T19:20:00Z", messages: 34, firstPrompt: "ponme 10 derivadas de examen y corrígemelas" },
+    { id: "d4f7b0c3-5e8a-4b14-8f6d-9c3e5a8b1d44", title: "Comentario de texto: Machado", project: "Estudios", started: "2026-11-06T17:30:00Z", lastActive: "2026-11-06T18:15:00Z", messages: 18, firstPrompt: "ayúdame a estructurar un comentario de «Caminante, no hay camino»" },
+    { id: "e5a8c1d4-6f9b-4c25-9a7e-0d4f6b9c2e55", title: "Plan de estudio para enero", project: "Estudios", started: "2026-11-16T20:00:00Z", lastActive: "2026-11-17T09:10:00Z", messages: 15, firstPrompt: "hazme un calendario para preparar los exámenes de enero" },
+
+    // ── Ajedrez ────────────────────────────────────────────────
+    { id: "f6b9d2e5-7a0c-4d36-8b8f-1e5a7c0d3f66", title: "Cómo funciona el Elo", project: "Ajedrez", started: "2026-10-24T22:00:00Z", lastActive: "2026-10-24T22:30:00Z", messages: 10, firstPrompt: "explícame la fórmula del Elo con un ejemplo", related: ["3f9b2d76-6a4e-4c18-8e91-5d3a7f0b2e4d"] },
+    { id: "07c0e3f6-8b1d-4e47-9c9a-2f6b8d1e4a77", title: "Aperturas para blancas", project: "Ajedrez", started: "2026-10-10T19:00:00Z", lastActive: "2026-10-10T19:45:00Z", messages: 22, firstPrompt: "qué apertura me recomiendas si juego e4 y me gusta atacar" },
+    { id: "18d1f4a7-9c2e-4f58-8dab-3a7c9e2f5b88", title: "Reglamento del torneo", project: "Ajedrez", started: "2026-11-07T11:00:00Z", lastActive: "2026-11-07T11:40:00Z", messages: 14, firstPrompt: "redacta las normas del torneo de navidad del club", related: ["9c5e0a31-2b8d-4f6c-b7e4-0a9c3e5f1d5e"] },
+
+    // ── Viajes ─────────────────────────────────────────────────
+    { id: "29e2a5b8-0d3f-4a69-9ebc-4b8d0f3a6c99", title: "Ruta por Asturias", project: "Viajes", started: "2026-10-19T10:00:00Z", lastActive: "2026-10-19T10:50:00Z", messages: 20, firstPrompt: "4 días por Asturias en coche, sin prisas" },
+    { id: "3af3b6c9-1e4a-4b7a-8fcd-5c9e1a4b7daa", title: "Qué llevar a la montaña", project: "Viajes", started: "2026-10-20T09:00:00Z", lastActive: "2026-10-20T09:20:00Z", messages: 8, firstPrompt: "lista de cosas para una ruta de un día en otoño" },
+    { id: "4b04c7da-2f5b-4c8b-9ade-6daf2b5c8ebb", title: "Cielos oscuros en España", project: "Viajes", started: "2026-11-11T21:00:00Z", lastActive: "2026-11-11T21:35:00Z", messages: 16, firstPrompt: "sitios con poca contaminación lumínica para ver estrellas", related: ["a1c4e7f0-2b5d-4e81-9c3a-6f0b2d5e8a11"] },
+
+    // ── Cocina ─────────────────────────────────────────────────
+    { id: "5c15d8eb-3a6c-4d9c-8bef-7eb03c6d9fcc", title: "Croquetas de la abuela", project: "Cocina", started: "2026-10-06T13:30:00Z", lastActive: "2026-10-06T13:55:00Z", messages: 9, firstPrompt: "cómo consigo que la bechamel no quede grumosa", related: ["a07f3c92-5e1d-4b68-9f24-6e3a8d0c5b76"] },
+    { id: "6d26e9fc-4b7d-4ead-9cf0-8fc14d7eaadd", title: "Menú de la semana", project: "Cocina", started: "2026-11-02T10:00:00Z", lastActive: "2026-11-02T10:30:00Z", messages: 13, firstPrompt: "menú barato y sano para 5 días" },
+    { id: "7e37fa0d-5c8e-4fbe-8d01-9ad25e8fbbee", title: "Sustituir el huevo", project: "Cocina", started: "2026-11-14T19:00:00Z", lastActive: "2026-11-14T19:10:00Z", messages: 6, firstPrompt: "con qué sustituyo el huevo en un bizcocho" },
+
+    // ── Sin proyecto ───────────────────────────────────────────
+    { id: "8f480b1e-6d9f-4acf-9e12-0be36f9accff", title: "Correo al casero", project: "Sin proyecto", started: "2026-10-09T08:40:00Z", lastActive: "2026-10-09T08:55:00Z", messages: 7, firstPrompt: "escribe un correo educado pidiendo que arreglen la caldera" },
+    { id: "90591c2f-7ea0-4bd0-8f23-1cf47a0bdd00", title: "Qué portátil comprar", project: "Sin proyecto", started: "2026-10-26T17:00:00Z", lastActive: "2026-10-26T18:10:00Z", messages: 24, firstPrompt: "portátil para programar y algo de juegos, unos 900 €" },
+    { id: "a16a2d30-8fb1-4ce1-9034-2d058b1cee11", title: "Ideas para un podcast", project: "Sin proyecto", started: "2026-10-11T22:00:00Z", lastActive: "2026-10-11T22:40:00Z", messages: 19, firstPrompt: "quiero hacer un podcast de historia, ¿cómo lo enfoco?", related: ["0d8c4b62-7f3a-4e15-9a27-6c1e8d5b4f70"] },
+    { id: "b27b3e41-90c2-4df2-8145-3e169c2dff22", title: "Nombre para la app de recetas", project: "Sin proyecto", started: "2026-10-05T20:00:00Z", lastActive: "2026-10-05T20:15:00Z", messages: 8, firstPrompt: "dame nombres cortos para una app de recetas familiares", related: ["a07f3c92-5e1d-4b68-9f24-6e3a8d0c5b76"] },
+    { id: "c38c4f52-a1d3-4e03-9256-4f27ad3e0033", title: "Cómo funciona un LLM", project: "Sin proyecto", started: "2026-11-15T23:00:00Z", lastActive: "2026-11-16T00:05:00Z", messages: 21, firstPrompt: "explícame qué es un token y la ventana de contexto", related: ["9e4c7b02-3a8f-4d59-b1c6-7a3e2d9f5ba3"] },
+    { id: "d49d5063-b2e4-4f14-8367-50380e4f1144", title: "Felicitación de cumpleaños", project: "Sin proyecto", started: "2026-11-17T08:00:00Z", lastActive: "2026-11-17T08:12:00Z", messages: 5, firstPrompt: "un mensaje gracioso para el cumple de mi hermano" }
   ]
 };
