@@ -736,16 +736,6 @@ html.desktop .session.real:not(.shell) .claude-box { display: block; }
 .cb-models button:hover:not(:disabled) { color: var(--ink-2); }
 .cb-models button[aria-checked="true"] { color: var(--ink); }
 .cb-models button[aria-checked="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1.5px; background: var(--accent); }
-/* esfuerzo: cinco puntos sobre una línea (como los de las órbitas); la línea se llena hasta el elegido */
-.cb-scale { position: relative; display: flex; justify-content: space-between; align-items: center; height: 22px; margin: 6px 3px 0; }
-.cb-track { position: absolute; left: 4px; right: 4px; top: 50%; height: 1px; background: var(--line-2); }
-.cb-track i { position: absolute; left: 0; top: 0; height: 1px; width: calc(var(--k, 0) * 25%); background: var(--ink-2); transition: width var(--t-med) var(--ease-out); }
-.cb-scale button { position: relative; z-index: 1; display: grid; place-items: center; width: 18px; height: 22px; }
-.cb-scale button::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--bg); box-shadow: 0 0 0 1px var(--line-2); transition: transform var(--t-fast), background var(--t-fast), box-shadow var(--t-fast); }
-.cb-scale button.on::before { background: var(--ink-2); box-shadow: 0 0 0 1px var(--ink-2); }
-.cb-scale button:hover:not(:disabled)::before { transform: scale(1.4); }
-.cb-scale button[aria-checked="true"]::before { width: 7px; height: 7px; background: var(--accent); box-shadow: 0 0 0 3px var(--bg), 0 0 0 4px var(--accent); }
-.cb-ends { display: flex; justify-content: space-between; text-align: left; margin-top: 2px; }
 .claude-box button:disabled { cursor: var(--cur); opacity: .45; }
 .cb-tip { margin-top: 6px; font-size: 10px; line-height: 1.6; color: var(--faint); }
 .cb-tip b { font-weight: 500; color: var(--ink-2); }

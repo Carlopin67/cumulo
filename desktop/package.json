@@ -1,7 +1,7 @@
 {
   "name": "cumulo",
   "productName": "Cúmulo",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Lanzador de sesiones de Claude Code como cúmulo de estrellas",
   "main": "main.js",
   "private": true,

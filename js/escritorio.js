@@ -97,7 +97,7 @@
       return true;
     });
     xt.onData(d => D.term.write(key, d));
-    D.term.onData(key, d => xt.write(d));
+    D.term.onData(key, d => { xt.write(d); if (!t.opts.shell) sniff(t); });
     D.term.onExit(key, () => {
       t.exited = true;
       xt.write("\r\n\x1b[2m— La sesión ha terminado. Pulsa Intro para volver a abrirla.\x1b[0m\r\n");
@@ -111,7 +111,34 @@
   async function start(t) {
     const r = await D.term.open({ key: t.key, sessionId: t.sessionId, cwd: t.opts.cwd, shellOnly: t.opts.shell, cols: t.xt.cols, rows: t.xt.rows });
     t.pid = r.pid; t.exited = false;
-    if (r.buffer) t.xt.write(r.buffer);
+    if (r.buffer) { t.xt.write(r.buffer); if (!t.opts.shell) sniff(t); }
+  }
+  // modelo y esfuerzo leídos del texto que Claude tiene en pantalla: así el panel acierta desde el
+  // principio y confirma al momento lo que eliges. Lo vivo manda: el pie («● high · /effort») y la
+  // cabecera («Opus 5.5 with high effort»); si no se ven, el último «Set model/effort to…».
+  const EF = "(low|medium|high|xhigh|max)", MD = "(Haiku|Sonnet|Opus|Fable)";
+  const RX_HEAD = new RegExp(MD + " \d+(?:\.\d+)? with " + EF + " effort");
+  const RX_FOOT = new RegExp("[●◐◑◒◓○◉•] ?" + EF + " · /effort");
+  const RX_SETM = new RegExp("(?:Set model to|Using) " + MD + " ", "g");
+  const RX_SETE = new RegExp("effort level to " + EF, "g");
+  function sniff(t) {
+    if (t.sniffT) return; // como mucho una lectura cada medio segundo, aunque la terminal no pare
+    t.sniffT = setTimeout(() => {
+      t.sniffT = 0;
+      const b = t.xt.buffer.active, lines = [];
+      for (let i = Math.max(0, b.length - 400); i < b.length; i++) { const l = b.getLine(i); if (l) lines.push(l.translateToString(true)); }
+      const txt = lines.join("\n");
+      const last = rx => { let m, r = null; rx.lastIndex = 0; while ((m = rx.exec(txt))) r = m[1]; return r; };
+      const head = txt.match(RX_HEAD), foot = txt.match(RX_FOOT);
+      const model = (head && head[1]) || last(RX_SETM);
+      const effort = (foot && foot[1]) || (head && head[2]) || last(RX_SETE);
+      const seen = t.seen || (t.seen = {}), now = Date.now();
+      const id = model && MODELS.find(x => x.name === model).id;
+      let changed = false;
+      if (id && id !== seen.model) { seen.model = id; seen.modelAt = now; changed = true; }
+      if (effort && effort !== seen.effort) { seen.effort = effort; seen.effortAt = now; changed = true; }
+      if (changed && t === active) claudeBox(t, t.ctx, t.busy ? "busy" : "idle");
+    }, 500);
   }
   function restart(t) { t.xt.clear(); start(t); }
 
@@ -136,18 +163,19 @@
       if (prev !== L.status) emit(t, L.status === "busy" ? "working" : L.status === "idle" ? (prev === "busy" ? "done" : "idle") : "ask");
       const c = v.context && t.sessionId && v.context[t.sessionId];
       if (c && t === active && window.cumuloMonitor && window.cumuloMonitor.setContext) window.cumuloMonitor.setContext(c.tokens);
+      t.ctx = c;
       if (t === active) claudeBox(t, c, L.status);
     });
   });
 
   // ── modelo y esfuerzo de la sesión abierta (en vez de escribir /model y /effort) ──
   const MODELS = [
-    { id: "claude-opus-5-5", name: "Opus", label: "Opus 5.5", rx: /opus/i },
-    { id: "claude-sonnet-5-5", name: "Sonnet", label: "Sonnet 5.5", rx: /sonnet/i },
     { id: "claude-haiku-5-5", name: "Haiku", label: "Haiku 5.5", rx: /haiku/i },
+    { id: "claude-sonnet-5-5", name: "Sonnet", label: "Sonnet 5.5", rx: /sonnet/i },
+    { id: "claude-opus-5-5", name: "Opus", label: "Opus 5.5", rx: /opus/i },
     { id: "claude-fable-5-2", name: "Fable", label: "Fable 5.2", rx: /fable/i },
   ];
-  const EFFORTS = [["low", "Bajo"], ["medium", "Medio"], ["high", "Alto"], ["xhigh", "Muy alto"], ["max", "Máximo"]];
+  const EFFORTS = [["low", "Bajo", "Bajo"], ["medium", "Medio", "Medio"], ["high", "Alto", "Alto"], ["xhigh", "Muy alto", "Muy alto"], ["max", "Máximo", "Máx"]];
   const cbBox = document.getElementById("claudeBox");
   const cbModelVal = document.getElementById("cbModelVal"), cbEffortVal = document.getElementById("cbEffortVal");
   const cbModel = document.getElementById("cbModel"), cbEffort = document.getElementById("cbEffort");
@@ -158,46 +186,63 @@
     box.querySelectorAll("button").forEach(b => b.remove());
     items.forEach(([val, label, title]) => {
       const b = document.createElement("button"); b.type = "button"; b.role = "radio"; b.dataset.v = val;
-      if (kind === "model") b.textContent = label; else b.setAttribute("aria-label", label);
-      b.title = title || label;
+      b.textContent = label; b.title = title || label;
       b.setAttribute("aria-checked", "false");
       b.onclick = () => choose(kind, val);
       box.append(b);
     });
   }
   segButtons(cbModel, MODELS.map(m => [m.id, m.name, m.id]), "model");
-  segButtons(cbEffort, EFFORTS.map(([v, l]) => [v, l, l]), "effort");
-  function mark(box, val) {
+  segButtons(cbEffort, EFFORTS.map(([v, l, s]) => [v, s, l]), "effort");
+  function markBox(box, val) {
     const bs = [...box.querySelectorAll("button")], k = bs.findIndex(b => b.dataset.v === val);
-    bs.forEach((b, i) => { b.setAttribute("aria-checked", String(i === k)); b.classList.toggle("on", k >= 0 && i < k); });
+    bs.forEach((b, i) => b.setAttribute("aria-checked", String(i === k)));
     if (box === cbEffort) {
-      box.style.setProperty("--k", Math.max(0, k));
       cbEffortVal.textContent = k >= 0 ? EFFORTS[k][1] : "—";
     } else {
       const m = MODELS.find(x => x.id === val);
       cbModelVal.textContent = m ? m.label : "—";
     }
   }
+  // el comando se teclea y el Intro va aparte: si va todo junto, Claude lo toma como texto pegado y no lo ejecuta
+  function send(t, cmd) {
+    D.term.write(t.key, cmd);
+    setTimeout(() => D.term.write(t.key, "\r"), 250);
+  }
+  const queued = new Map(); // terminal -> órdenes elegidas mientras Claude trabajaba
   function choose(kind, val) {
     if (!active || active.exited) return;
-    if (active.busy) { cbSub.textContent = "espera a que termine"; return; }
-    D.term.write(active.key, kind === "model" ? `/model ${val}\r` : `/effort ${val}\r`);
-    wanted = { kind, val, at: Date.now() };
-    mark(kind === "model" ? cbModel : cbEffort, val);
+    const cmd = kind === "model" ? `/model ${val}` : `/effort ${val}`;
+    if (active.busy) {
+      const q = queued.get(active) || {}; q[kind] = cmd; queued.set(active, q);
+    } else send(active, cmd);
+    wanted = { kind, val, at: Date.now() + (active.busy ? 600000 : 0) };
+    markBox(kind === "model" ? cbModel : cbEffort, val);
     cbBox.classList.add("pending-" + kind);
+    cbSub.textContent = active.busy ? "se aplica al terminar" : "";
     active.xt.focus();
   }
   function claudeBox(t, c, status) {
     t.busy = status === "busy";
-    cbBox.querySelectorAll("button").forEach(b => { b.disabled = t.busy; });
-    cbSub.textContent = t.busy ? "trabajando…" : "";
+    const q = queued.get(t);
+    if (!t.busy && q) {
+      queued.delete(t);
+      Object.values(q).forEach((cmd, i) => setTimeout(() => send(t, cmd), i * 700));
+      if (wanted) wanted.at = Date.now();
+    }
+    cbSub.textContent = queued.has(t) ? "se aplica al terminar" : t.busy ? "trabajando…" : "";
+    // lo más reciente manda: la barra de estado (tras cada mensaje) o lo visto en la terminal
+    const sn = t.seen || {}, cm = c && MODELS.find(x => x.rx.test(c.model || c.modelName || ""));
+    const cat = (c && c.at) || 0;
+    const model = (sn.modelAt || 0) > cat ? sn.model : (cm && cm.id) || sn.model;
+    const effort = (sn.effortAt || 0) > cat ? sn.effort : (c && c.effort) || sn.effort;
+    const fresh = wanted && Date.now() - wanted.at < 8000;
+    for (const [kind, box, val] of [["model", cbModel, model], ["effort", cbEffort, effort]]) {
+      if (!val) continue;
+      if (fresh && wanted.kind === kind && val !== wanted.val) continue; // aún no lo ha aplicado
+      markBox(box, val); cbBox.classList.remove("pending-" + kind);
+    }
     if (c) {
-      const m = MODELS.find(x => x.rx.test(c.model || c.modelName || ""));
-      const fresh = wanted && Date.now() - wanted.at < 8000;
-      if (!(fresh && wanted.kind === "model") && m) { mark(cbModel, m.id); cbBox.classList.remove("pending-model"); }
-      if (!(fresh && wanted.kind === "effort") && c.effort) { mark(cbEffort, c.effort); cbBox.classList.remove("pending-effort"); }
-      if (fresh && wanted.kind === "model" && m && m.id === wanted.val) cbBox.classList.remove("pending-model");
-      if (fresh && wanted.kind === "effort" && c.effort === wanted.val) cbBox.classList.remove("pending-effort");
       const n = c.tokens || 0;
       cbTip.className = "cb-tip" + (n >= 400000 ? " crit" : n >= 150000 ? " warn" : "");
       cbTip.innerHTML = n >= 400000
@@ -215,6 +260,7 @@
       if (!t) t = await make(key, opts);
       terms.forEach(o => { o.el.hidden = o !== t; });
       active = t;
+      if (!t.opts.shell) claudeBox(t, t.ctx, t.busy ? "busy" : "idle");
       requestAnimationFrame(() => { fitNow(t); t.xt.focus(); });
       return t;
     },
