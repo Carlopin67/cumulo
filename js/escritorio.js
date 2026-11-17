@@ -23,6 +23,8 @@
   };
   document.querySelector(".titlebar .tb-right").append(winBtns());
   document.querySelector("#session .s-tools").append(winBtns());
+  if (D.isShell) document.querySelectorAll('.win-ctl [data-a="min"], .win-ctl [data-a="hide"]').forEach(b => { b.title = "Mandar detrás (Cúmulo es tu escritorio: no se cierra)"; });
+  document.querySelector("#session .s-tools").append(winBtns());
   const setFs = v => {
     root.classList.toggle("fullscreen", v);
     document.querySelectorAll('.win-ctl [data-a="fs"]').forEach(b => { b.title = v ? "Salir de pantalla completa (F11)" : "Pantalla completa (F11)"; });

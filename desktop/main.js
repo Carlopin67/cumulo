@@ -297,8 +297,16 @@ ipcMain.handle("cfg:set", (_e, patch) => {
   return cfg;
 });
 ipcMain.on("win:fullscreen", () => { if (win) win.setFullScreen(!win.isFullScreen()); });
-ipcMain.on("win:minimize", () => { if (win) win.minimize(); });
-ipcMain.on("win:hide", () => { if (!win) return; if (SHELL) win.minimize(); else win.hide(); }); // a la bandeja (sin bandeja, si es el escritorio)
+// Como escritorio, Cúmulo nunca se minimiza (detrás no hay nada y la pantalla se quedaba gris):
+// «minimizar» y «cerrar» lo mandan detrás, trayendo delante la última app abierta; si no hay ninguna, se queda.
+async function toBack() {
+  if (!win) return;
+  const list = await ventanas.list(app.getPath("userData"), process.pid).catch(() => []);
+  const next = list.find(w => !w.min);
+  if (next) ventanas.focus(next.h, app.getPath("userData"));
+}
+ipcMain.on("win:minimize", () => { if (!win) return; if (SHELL) toBack(); else win.minimize(); });
+ipcMain.on("win:hide", () => { if (!win) return; if (SHELL) toBack(); else win.hide(); }); // fuera de escritorio: a la bandeja
 ipcMain.on("app:shell", e => { e.returnValue = SHELL; });
 ipcMain.on("win:sync", e => { e.returnValue = win ? win.isFullScreen() : true; });
 
@@ -337,7 +345,9 @@ function createWindow() {
     if (i.type === "keyDown" && i.control && i.key.toLowerCase() === "r" && i.shift) win.webContents.reload();
   });
   // cerrar la ventana la esconde en la bandeja: las sesiones siguen vivas
-  win.on("close", e => { if (!app.isQuitting) { e.preventDefault(); if (SHELL) win.minimize(); else win.hide(); } });
+  win.on("close", e => { if (!app.isQuitting) { e.preventDefault(); if (SHELL) toBack(); else win.hide(); } });
+  // si algo lo minimiza igualmente (Win+M, otra app…), vuelve enseguida a su sitio, detrás
+  win.on("minimize", () => { if (SHELL) setTimeout(() => { if (win && win.isMinimized()) { win.restore(); win.setFullScreen(true); } }, 60); });
   // si el proceso de la página se cae, se vuelve a cargar (como escritorio no puede quedarse en negro)
   win.webContents.on("render-process-gone", () => { setTimeout(() => { if (win && !win.isDestroyed()) win.reload(); }, 800); });
 }
