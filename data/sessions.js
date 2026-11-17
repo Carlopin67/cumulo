@@ -12,7 +12,7 @@
 //   firstPrompt → primer mensaje que escribiste
 //   related     → (opcional) ids de otras sesiones con las que conectar un hilo
 
-window.CUMULO_DATA = {
+if (!window.CUMULO_DATA) window.CUMULO_DATA = { // en la app instalable ya vienen los datos reales
   sessions: [
     // ── observatorio ───────────────────────────────────────────
     { id: "4f2a91c3-7d1e-4b8a-9c02-1e6b5d3a7f10", title: "Mapa del cielo en canvas", project: "C:\\Users\\carlos\\Proyectos\\observatorio", started: "2026-10-02T17:12:00Z", lastActive: "2026-10-02T19:40:00Z", messages: 64, firstPrompt: "quiero una web que dibuje el cielo de esta noche desde Madrid" },

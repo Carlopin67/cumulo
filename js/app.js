@@ -4,6 +4,7 @@
   "use strict";
 
   const DATA = window.CUMULO_DATA || {};
+  const DESK = window.cumuloDesktop || null; // app instalable: terminales y datos de verdad
 
   // Colores por proyecto. Oscuro: temperaturas de estrellas reales. Claro: tintas de atlas impreso.
   const PAL_DARK = ["#9fbaff", "#ffd29a", "#cddaff", "#ffae78", "#efeaff", "#ffe2bd", "#8fa9f2", "#ffc08a"];
@@ -1411,6 +1412,11 @@
       }
       return;
     }
+    if (DESK && current && current.s && window.cumuloTerm) { // app instalable: Claude de verdad
+      const S = current.s;
+      window.cumuloTerm.show(S.termKey || S.id, { sessionId: S.pseudo ? null : S.id, cwd: S.cwd || (proj && proj.path), shell: S.shell });
+      return;
+    }
     const b = block({ cmd: true, prompt: s ? `claude --resume ${s.id}` : "claude", time: clock() });
     await wait(450); if (id !== run) return;
     if (s) {
@@ -1425,7 +1431,16 @@
     outLine(b.out, "(Simulación: en la versión instalable aquí se abre Claude de verdad.)", "d");
   }
 
+  let newCount = 0;
+  function newPseudo(proj, shell) {
+    newCount++;
+    const now = new Date().toISOString();
+    return { pseudo: true, shell: !!shell, id: "", termKey: (shell ? "shell-" : "nueva-") + newCount, title: shell ? "Terminal" : "Nueva sesión",
+      proj, plane: PLANES.code, cwd: proj ? proj.path : null, messages: 0, started: now, lastActive: now };
+  }
   function openSession(s, origin) {
+    if (DESK && !s && P.kind === "code") s = newPseudo((selected && selected.proj) || hoverProject || projList[0]);
+    const star = s && !s.pseudo ? s : null; // la estrella a la que zambullirse (una sesión nueva aún no tiene)
     const switching = sessionEl.classList.contains("open"); // cambio de sesión desde la barra inferior
     if (closeTimer) { clearTimeout(closeTimer); closeTimer = 0; } // reabrir mientras la estrella volvía a su sitio
     const dk = s ? dockAdd(s) : null;
@@ -1439,7 +1454,9 @@
     $("sProject").innerHTML = proj ? dotHTML(proj) : "";
     $("sTitle").textContent = s ? s.title : (chat ? "Nuevo chat" : "Nueva sesión");
     $("sMeta").textContent = chat ? (proj && proj.name !== "Sin proyecto" ? `Proyecto · ${proj.name}` : "Chat sin proyecto") : (proj ? proj.path : "");
-    $("sId").textContent = s ? s.id : "sin guardar todavía";
+    $("sId").textContent = s && s.id ? s.id : "sin guardar todavía";
+    sessionEl.classList.toggle("real", !!(DESK && s && !chat));
+    sessionEl.classList.toggle("shell", !!(s && s.shell));
     $("sCopy").querySelector("span").textContent = chat ? "Copiar enlace" : "Copiar orden";
     sInput.placeholder = chat ? "Pregunta a Claude…" : "Escribe a Claude…";
     if (streaming) streaming.stop();
@@ -1452,7 +1469,7 @@
       sessionEl.classList.remove("switching"); void sessionEl.offsetWidth;
       if (motion) { sessionEl.classList.add("switching"); clearTimeout(enterTimer); enterTimer = setTimeout(() => sessionEl.classList.remove("switching"), 700); }
       const id = ++run;
-      setTimeout(() => { if (id === run) { intro(s, proj, id); sInput.focus({ preventScroll: true }); } }, motion ? 120 : 0);
+      setTimeout(() => { if (id === run) { intro(star, proj, id); if (!DESK) sInput.focus({ preventScroll: true }); } }, motion ? 120 : 0);
       return;
     }
     if (sAnim) { sAnim.cancel(); sAnim = null; }
@@ -1461,19 +1478,19 @@
     // 1) la estrella se coloca en el centro de la pantalla (el inspector se aparta)
     // 2) ya quieta, la cámara se zambulle, su luz llena la pantalla y la sesión surge de ella
     camBefore = { x: cam.x, y: cam.y, z: cam.z };
-    document.body.classList.toggle("diving", !!s);
-    const [sx0, sy0] = s ? toScreen(s.x, s.y) : [W / 2, H / 2];
-    const needCenter = s && motion && Math.hypot(sx0 - W / 2, sy0 - H / 2) > 4;
+    document.body.classList.toggle("diving", !!star);
+    const [sx0, sy0] = star ? toScreen(star.x, star.y) : [W / 2, H / 2];
+    const needCenter = star && motion && Math.hypot(sx0 - W / 2, sy0 - H / 2) > 4;
     const CENTER = 900;
-    if (needCenter) flyTo(s.x, s.y, cam.z, { dur: CENTER, noPanel: true, noDip: true, ease: easeInOutSine });
+    if (needCenter) flyTo(star.x, star.y, cam.z, { dur: CENTER, noPanel: true, noDip: true, ease: easeInOutSine });
     const id = ++run;
     clearTimeout(openTimer);
     const reveal = () => {
       if (id !== run) return;
       openTimer = 0;
-      const from = s && motion ? labelBox(s, cam) : null;
-      if (s) flyTo(s.x, s.y, Math.min(ZMAX, Math.max(cam.z, 1.5) * 2.4), { dur: 760, noPanel: true, noDip: true, ease: easeInOutCubic });
-      if (s && motion) dive = { s, t0: performance.now(), dur: 1150, dir: 1 };
+      const from = star && motion ? labelBox(star, cam) : null;
+      if (star) flyTo(star.x, star.y, Math.min(ZMAX, Math.max(cam.z, 1.5) * 2.4), { dur: 760, noPanel: true, noDip: true, ease: easeInOutCubic });
+      if (star && motion) dive = { s: star, t0: performance.now(), dur: 1150, dir: 1 };
 
       sessionEl.classList.remove("closing");
       sessionEl.classList.add("open"); sessionEl.setAttribute("aria-hidden", "false");
@@ -1482,23 +1499,23 @@
       if (motion) {
         const to = from ? tabBox($("sTitle")) : null; // se mide antes de que empiecen las animaciones de entrada
         const [ox, oy] = origin || [W / 2, H / 2];
-        if (!s) sessionEl.style.transformOrigin = `${ox}px ${oy}px`;
+        if (!star) sessionEl.style.transformOrigin = `${ox}px ${oy}px`;
         sessionEl.classList.add("entering");
         clearTimeout(enterTimer); enterTimer = setTimeout(() => sessionEl.classList.remove("entering"), 1400);
         sAnim = sessionEl.animate(
-          [{ opacity: 0, filter: "blur(10px)", transform: s ? "scale(1.035)" : "scale(.97)" }, { opacity: 1, filter: "blur(0px)", transform: "none" }],
-          { duration: s ? 560 : 420, delay: s ? 340 : 0, easing: "cubic-bezier(.16,1,.3,1)", fill: "backwards" }
+          [{ opacity: 0, filter: "blur(10px)", transform: star ? "scale(1.035)" : "scale(.97)" }, { opacity: 1, filter: "blur(0px)", transform: "none" }],
+          { duration: star ? 560 : 420, delay: star ? 340 : 0, easing: "cubic-bezier(.16,1,.3,1)", fill: "backwards" }
         );
         sAnim.onfinish = () => { sAnim = null; };
         // el nombre de la estrella viaja hasta la pestaña
         if (from) {
           const t = $("sTitle");
-          t.style.opacity = "0"; labelHidden = s;
+          t.style.opacity = "0"; labelHidden = star;
           flyTitle(s.title, { ...from, fs: 14, st: "75%", c: rgba(th.ink, 0.96) }, to, 720, 40)
             .then(() => { t.style.opacity = ""; });
         }
       }
-      setTimeout(() => { if (id === run) { intro(s, proj, id); if (!matchMedia("(pointer: coarse)").matches) sInput.focus({ preventScroll: true }); } }, motion ? (s ? 620 : 300) : 0);
+      setTimeout(() => { if (id === run) { intro(star, proj, id); if (!DESK && !matchMedia("(pointer: coarse)").matches) sInput.focus({ preventScroll: true }); } }, motion ? (star ? 620 : 300) : 0);
     };
     if (needCenter) openTimer = setTimeout(reveal, CENTER); else reveal();
   }
@@ -1513,7 +1530,8 @@
 
   function closeSession() {
     if (!sessionEl.classList.contains("open")) return;
-    const s = current && current.s;
+    const s = current && current.s && !current.s.pseudo ? current.s : null;
+    if (DESK && window.cumuloTerm) window.cumuloTerm.hide();
     if (streaming) {
       streaming.stop();
       const o = s && dockFind(s);
@@ -1591,8 +1609,8 @@
     let o = dockFind(s); if (o) return o;
     const el = document.createElement("button"); el.type = "button"; el.className = "dock-item";
     el.style.setProperty("--cd", s.proj.cd); el.style.setProperty("--cl", s.proj.cl);
-    el.dataset.kind = s.plane.kind;
-    el.innerHTML = `${ICONS[s.plane.kind]}<span class="t"></span><span class="st" aria-hidden="true"></span><span class="x" aria-label="Quitar de la barra"><svg class="ico" viewBox="0 0 16 16"><path d="M5 5l6 6M11 5l-6 6"/></svg></span>`;
+    el.dataset.kind = s.shell ? "shell" : s.plane.kind;
+    el.innerHTML = `${ICONS[s.shell ? "code" : s.plane.kind]}<span class="t"></span><span class="st" aria-hidden="true"></span><span class="x" aria-label="Quitar de la barra"><svg class="ico" viewBox="0 0 16 16"><path d="M5 5l6 6M11 5l-6 6"/></svg></span>`;
     el.querySelector(".t").textContent = s.title;
     o = { s, el, state: "", pending: null, timer: 0 };
     el.onclick = e => { if (e.target.closest(".x")) dockRemove(o); else dockOpen(o); };
@@ -1608,6 +1626,7 @@
   }
   function dockRemove(o) {
     clearTimeout(o.timer);
+    if (DESK && window.cumuloTerm) window.cumuloTerm.kill(o.s.termKey || o.s.id);
     opened.splice(opened.indexOf(o), 1);
     if (current && current.s === o.s) closeSession();
     o.el.classList.add("leaving"); setTimeout(() => o.el.remove(), 320);
@@ -1618,11 +1637,12 @@
   function dockOpen(o) {
     const s = o.s;
     if (sessionEl.classList.contains("open")) { if (!(current && current.s === s)) openSession(s); return; }
+    if (s.pseudo) { openSession(s); return; }
     const go = () => { select(s); openSession(s, toScreen(s.x, s.y)); };
     if (s.plane !== P) { switchPlane(s.plane.kind); setTimeout(go, reduced() ? 0 : 700); } else go();
   }
   // simulación: tres sesiones abiertas; una termina de responder y otra te pregunta algo al rato
-  {
+  if (!DESK) {
     const recent = list => [...list].sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive));
     const [c1, c2] = recent(PLANES.code.sessions), [a1] = recent(PLANES.ask.sessions);
     const w = c1 && dockAdd(c1, "working"), q = c2 && dockAdd(c2); if (a1) dockAdd(a1);
@@ -1645,6 +1665,7 @@
   const ctxBtn = $("ctxCompact");
   ctxBtn.addEventListener("click", async () => {
     const m = window.cumuloMonitor;
+    if (DESK && current && current.s && window.cumuloTerm) { window.cumuloTerm.send(current.s.termKey || current.s.id, "/compact\r"); window.cumuloTerm.focus(); return; }
     if (!m || ctxBtn.classList.contains("busy")) return;
     if (streaming) streaming.stop();
     const label = ctxBtn.querySelector("span");
@@ -1688,6 +1709,9 @@
       if (e.key === "ArrowLeft") { showShot(vIdx - 1); return; }
       if (e.key === "ArrowRight") { showShot(vIdx + 1); return; }
     }
+    if (DESK && inSession && e.altKey && e.key === "ArrowLeft") { e.preventDefault(); closeSession(); return; }
+    if (e.key === "Escape" && window.cumuloPalette && window.cumuloPalette.isOpen()) return;
+    if (e.key === "Escape" && DESK && inSession && sessionEl.classList.contains("real")) return; // Esc lo recibe Claude
     if (e.key === "Escape") {
       if (inSession) { if (streaming) streaming.stop(); else closeSession(); }
       else if (cancelOpen()) { /* entrada cancelada */ }
@@ -1701,6 +1725,29 @@
       $("pResume").click();
     }
   });
+
+  // estado real de las sesiones abiertas en la barra de tareas
+  if (DESK && window.cumuloTerm) {
+    window.cumuloTerm.onStatus((key, st, sid) => {
+      const o = opened.find(x => (x.s.termKey || x.s.id) === key); if (!o) return;
+      if (st === "id") { if (o.s.pseudo && sid) { o.s.id = sid; if (current && current.s === o.s) $("sId").textContent = sid; } return; }
+      const here = current && current.s === o.s && sessionEl.classList.contains("open");
+      if (st === "working") dockState(o, "working");
+      else if (st === "done" || st === "ask") dockState(o, here ? "" : st);
+      else dockState(o, "");
+    });
+    $("sBack").title = "Volver al cúmulo (Alt+←)"; $("sBack").setAttribute("aria-label", "Volver al cúmulo (Alt+←)");
+  }
+  // para el lanzador: abrir una sesión por id y abrir un terminal
+  window.cumulo = {
+    openById(id) {
+      const s = byId.get(id); if (!s) return;
+      if (sessionEl.classList.contains("open")) { openSession(s); return; }
+      const go = () => { select(s); openSession(s, toScreen(s.x, s.y)); };
+      if (s.plane !== P) { switchPlane(s.plane.kind); setTimeout(go, reduced() ? 0 : 700); } else go();
+    },
+    openShell() { if (P.kind !== "code") switchPlane("code"); openSession(newPseudo(projList[0], true)); },
+  };
 
   window.addEventListener("resize", resize);
   resize();

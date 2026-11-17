@@ -439,7 +439,7 @@ body.returning .panel.open { transition: translate .95s cubic-bezier(.45, 0, .55
 .s-main.dragover .drop { opacity: 1; }
 
 /* monitor del sistema: columna derecha, gráficas difuminadas sin tarjeta */
-.monitor { border-left: 1px solid var(--line); overflow-y: auto; padding: 8px 16px 16px; background: var(--bg); }
+.monitor { border-left: 1px solid var(--line); overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; padding: 8px 16px 16px; background: var(--bg); }
 .mon-head {
   display: flex; align-items: center; gap: 8px; width: 100%; height: 26px; padding: 0 2px; margin-bottom: 4px;
   font-size: 10.5px; color: var(--muted); border-radius: 4px; transition: color var(--t-fast);
@@ -642,3 +642,65 @@ button:disabled { cursor: var(--cur); }
 .poll.answered .poll-opt.chosen { opacity: 1; color: var(--ink); border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
 .poll.answered .poll-opt.chosen .ok { opacity: 1; }
 .poll-own { margin-top: 8px; color: var(--ink); }
+
+/* ── app instalable ─────────────────────────────────────────── */
+/* la barra de título arrastra la ventana; a la derecha quedan los botones de Windows */
+html.desktop .titlebar, html.desktop .s-tabs { -webkit-app-region: drag; }
+html.desktop .titlebar button, html.desktop .titlebar input, html.desktop .titlebar label, html.desktop .titlebar [role="tablist"],
+html.desktop .s-tabs button, html.desktop .s-tabs .s-idchip { -webkit-app-region: no-drag; }
+
+/* sesión real: el terminal ocupa el sitio de los bloques y del compositor */
+.s-xterm { display: none; }
+.session.real .s-term, .session.real .composer { display: none; }
+.session.real .s-main { grid-template-rows: minmax(0, 1fr); }
+.session.real .s-xterm { display: block; position: relative; min-height: 0; padding: 12px 6px 6px 18px; background: var(--bg); }
+.s-xterm .xt { position: absolute; inset: 12px 6px 6px 18px; }
+.s-xterm .xt[hidden] { display: none; }
+.s-xterm .xterm { height: 100%; }
+.s-xterm .xterm-viewport { background: transparent !important; }
+.s-xterm .xterm-viewport::-webkit-scrollbar { width: 8px; }
+.s-xterm .xterm-viewport::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 4px; }
+.session.entering .s-xterm { animation: sIn .6s var(--ease-out) .52s backwards; }
+.session.switching .s-xterm { animation: sIn .4s var(--ease-out) .06s backwards; }
+.dock-item[data-kind="shell"] .glyph { stroke: var(--muted); }
+
+/* lanzador (Ctrl+Espacio dentro, Alt+Espacio desde cualquier sitio) */
+.palette { position: fixed; inset: 0; z-index: 50; display: grid; justify-items: center; align-items: start; padding-top: 14vh; background: rgba(0, 0, 0, .38); }
+:root[data-theme="light"] .palette { background: rgba(20, 20, 30, .14); }
+.palette[hidden] { display: none; }
+.pal-box { width: min(640px, calc(100vw - 32px)); background: var(--chrome); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
+.pal-field { display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 50px; border-bottom: 1px solid var(--line); cursor: var(--cur-text); }
+.pal-field .ico { width: 15px; height: 15px; fill: none; stroke: var(--muted); stroke-width: 1.4; stroke-linecap: round; flex: none; }
+.pal-field input { flex: 1; min-width: 0; height: 100%; background: none; border: 0; outline: none; font-size: 13.5px; cursor: var(--cur-text); }
+.pal-field input::placeholder { color: var(--faint); }
+.pal-list { list-style: none; max-height: min(420px, 56vh); overflow-y: auto; padding: 6px; }
+.pal-item { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; cursor: var(--cur-link); }
+.pal-item[aria-selected="true"] { background: var(--hover); }
+.pal-item[aria-selected="true"] .pi-kind { color: var(--accent); }
+.pi-ico { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line); background: var(--field); }
+.pi-ico svg { width: 14px; height: 14px; fill: none; stroke: var(--ink-2); stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+.pi-ico img { width: 18px; height: 18px; }
+.pal-item[data-kind="sess"] .pi-ico svg { stroke: var(--accent); }
+.pi-txt { display: grid; min-width: 0; }
+.pi-txt b { font-weight: 500; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pi-txt small { color: var(--faint); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pi-txt small:empty { display: none; }
+.pi-kind { color: var(--faint); font-size: 10.5px; }
+.pal-empty { color: var(--faint); padding: 14px 10px; }
+.pal-foot { display: flex; gap: 16px; padding: 8px 14px; border-top: 1px solid var(--line); color: var(--faint); font-size: 10.5px; }
+.pal-foot span { display: inline-flex; gap: 4px; align-items: center; }
+.pal-foot .pal-sc { margin-left: auto; }
+/* un terminal suelto (PowerShell) no tiene contexto de Claude */
+.session.shell .monitor .context { display: none; }
+.monitor::-webkit-scrollbar { width: 4px; }
+.monitor::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 2px; }
+/* botones de ventana propios */
+.win-ctl { display: flex; align-items: center; gap: 2px; margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--line); -webkit-app-region: no-drag; }
+.win-ctl button { display: grid; place-items: center; width: 28px; height: 26px; border-radius: 5px; color: var(--muted); transition: color var(--t-fast), background var(--t-fast); }
+.win-ctl button:hover { color: var(--ink); background: var(--hover); }
+.win-ctl button.close:hover { color: #fff; background: var(--crit); }
+.win-ctl svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
+.win-ctl .fs-in { display: none; }
+html:not(.fullscreen) .win-ctl .fs-out { display: none; }
+html:not(.fullscreen) .win-ctl .fs-in { display: inline; }
+.pal-list { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }

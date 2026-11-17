@@ -56,13 +56,13 @@
   const ROWS = [
     { k: "cpu", label: "CPU", pct: d => d.cpu.usage, value: d => [f0.format(d.cpu.usage), " %"],
       spark: d => d.cpu.usage, max: () => 100,
-      detail: d => `${d.cpu.cores} núcleos · ${f1.format(d.cpu.ghz)} GHz · ${f0.format(d.cpu.temp)} °C` },
+      detail: d => `${d.cpu.cores} núcleos · ${f1.format(d.cpu.ghz)} GHz${d.cpu.temp ? ` · ${f0.format(d.cpu.temp)} °C` : ""}` },
     { k: "ram", label: "RAM", pct: d => d.ram.used / d.ram.total * 100, value: d => [f1.format(d.ram.used), ` / ${f0.format(d.ram.total)} GB`],
       spark: d => d.ram.used / d.ram.total * 100, max: () => 100,
       detail: d => `${f1.format(d.ram.total - d.ram.used)} GB libres` },
     { k: "vram", label: "VRAM", pct: d => d.vram.used / d.vram.total * 100, value: d => [f1.format(d.vram.used), ` / ${f0.format(d.vram.total)} GB`],
       spark: d => d.vram.gpuUsage, max: () => 100,
-      detail: d => `GPU ${f0.format(d.vram.gpuUsage)} % · ${f0.format(d.vram.temp)} °C` },
+      detail: d => `GPU ${f0.format(d.vram.gpuUsage)} %${d.vram.temp ? ` · ${f0.format(d.vram.temp)} °C` : ""}` },
     { k: "disk", label: "Disco", pct: d => d.disk.used / d.disk.total * 100, value: d => [f0.format(d.disk.used), ` / ${gb(d.disk.total)}`],
       spark: d => d.disk.read + d.disk.write, max: null,
       detail: d => `lee ${mbs(d.disk.read)} · escribe ${mbs(d.disk.write)}` },
@@ -71,7 +71,7 @@
       detail: d => `sube ${mbs(d.net.up)}` },
     { k: "claude", label: "Claude", pct: null, value: d => [f1.format(d.claude.memory), " GB"],
       spark: d => d.claude.memory, max: null,
-      detail: d => `${d.claude.processes} ${d.claude.processes === 1 ? "proceso" : "procesos"}` },
+      detail: d => { const n = Math.round(d.claude.processes); return `${n} ${n === 1 ? "proceso" : "procesos"}`; } },
   ];
 
   const rowsEl = document.getElementById("monRows");
@@ -457,12 +457,19 @@
     setSession(s) {
       LIMITS.forEach(L => { L.shown = 0; L.shownT = 0; }); // las órbitas se vuelven a trazar al entrar
       const msgs = s ? s.messages : 0;
-      const seed = s ? s.id.charCodeAt(0) + s.id.charCodeAt(1) : 7;
+      const seed = s && s.id ? s.id.charCodeAt(0) + s.id.charCodeAt(1) : 7;
       ctx = {
         system: 3100, tools: 11600, mcp: 2400 + (seed % 5) * 900, memory: 1200 + (seed % 7) * 260,
         messages: Math.min(700000, msgs * 4200 + (seed % 11) * 1800), // sesiones largas llenan bastante más
       };
-      renderContext(true);
+      if (s && s.context) this.setContext(s.context, true); else renderContext(true);
+    },
+    // contexto real (app instalable): el total viene de Claude; lo fijo se reparte como en /context
+    setContext(tokens, fresh) {
+      if (!ctx || !tokens) return;
+      const fixed = ctx.system + ctx.tools + ctx.mcp + ctx.memory;
+      ctx.messages = Math.max(0, tokens - fixed);
+      renderContext(!!fresh);
     },
     // compactar: los mensajes se sustituyen por un resumen (~7 % de lo que ocupaban)
     compact() {
