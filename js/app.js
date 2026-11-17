@@ -8,7 +8,7 @@
 
   // Colores por proyecto. Oscuro: temperaturas de estrellas reales. Claro: tintas de atlas impreso.
   const PAL_DARK = ["#9fbaff", "#ffd29a", "#cddaff", "#ffae78", "#efeaff", "#ffe2bd", "#8fa9f2", "#ffc08a"];
-  const PAL_LIGHT = ["#2c4cb8", "#a85a14", "#4a5f9e", "#b8431c", "#463d63", "#8d6224", "#23408a", "#a44f1b"];
+  const PAL_LIGHT = ["#3d6bff", "#ff9a2e", "#6f8cff", "#ff6a3a", "#8a6cff", "#ffb23e", "#2f7dff", "#ff7f45"];
 
   const FONT_DISPLAY = "'Bricolage Grotesque', system-ui, sans-serif";
   const FONT_MONO = "'Martian Mono', ui-monospace, monospace";
@@ -97,12 +97,12 @@
   // ── tema ─────────────────────────────────────────────────────
   const THEMES = {
     dark: {
-      bg: [5, 6, 11], dust: [220, 225, 240], dustA: 1, ink: [236, 232, 222], muted: [141, 139, 134],
+      bg: [0, 0, 0], dust: [220, 225, 240], dustA: 1, ink: [236, 232, 222], muted: [141, 139, 134],
       grid: 0.028, blend: "lighter", relatedLink: "#e8e4da", key: "cd",
     },
     light: {
-      bg: [241, 237, 228], dust: [70, 64, 58], dustA: 0.5, ink: [27, 26, 33], muted: [111, 107, 99],
-      grid: 0.05, blend: "source-over", relatedLink: "#4a4650", key: "cl",
+      bg: [255, 255, 255], dust: [60, 66, 90], dustA: 0.45, ink: [20, 20, 26], muted: [112, 112, 120],
+      grid: 0.045, blend: "multiply", relatedLink: "#4a4650", key: "cl",
     },
   };
   const root = document.documentElement;
@@ -176,19 +176,20 @@
   const halo = (color, light) => cached("h" + color + light, 256, (g, m) => {
     const gr = g.createRadialGradient(m, m, 0, m, m, m);
     if (light) {
-      gr.addColorStop(0, rgba(color, .22)); gr.addColorStop(.25, rgba(color, .08)); gr.addColorStop(1, rgba(color, 0));
+      gr.addColorStop(0, rgba(color, .85)); gr.addColorStop(.06, rgba(color, .5)); gr.addColorStop(.18, rgba(color, .16));
+      gr.addColorStop(.42, rgba(color, .05)); gr.addColorStop(1, rgba(color, 0));
     } else {
       gr.addColorStop(0, rgba(color, .75)); gr.addColorStop(.06, rgba(color, .42)); gr.addColorStop(.18, rgba(color, .12));
       gr.addColorStop(.42, rgba(color, .035)); gr.addColorStop(1, rgba(color, 0));
     }
     g.fillStyle = gr; g.fillRect(0, 0, m * 2, m * 2);
-    if (!light) {
+    {
       g.strokeStyle = rgba(color, .05); g.lineWidth = 3;
       g.beginPath(); g.arc(m, m, m * .3, 0, 6.283); g.stroke();
     }
   });
   // picos de difracción: seis largos y dos cortos horizontales, todos con la misma orientación
-  const spikes = color => cached("s" + color, 512, (g, m) => {
+  const spikes = (color, light) => cached("s" + color + light, 512, (g, m) => {
     const ray = (ang, len, w, a) => {
       const dx = Math.cos(ang), dy = Math.sin(ang);
       const gr = g.createLinearGradient(m, m, m + dx * len, m + dy * len);
@@ -200,15 +201,22 @@
     };
     for (let k = 0; k < 6; k++) ray(-Math.PI / 2 + k * Math.PI / 3, m, 3.2, .9);
     ray(0, m * .42, 2, .55); ray(Math.PI, m * .42, 2, .55);
+    if (light) return;
     const core = g.createRadialGradient(m, m, 0, m, m, m * .1);
     core.addColorStop(0, "rgba(255,255,255,.6)"); core.addColorStop(1, "rgba(255,255,255,0)");
     g.fillStyle = core; g.fillRect(0, 0, m * 2, m * 2);
   });
   // núcleo: blanco incandescente con borde del color de la estrella
-  const core = color => cached("c" + color, 64, (g, m) => {
+  // en claro: punto blanco rodeado de un anillo saturado, para que siga leyéndose como luz sobre blanco
+  const core = (color, light) => cached("c" + color + light, 64, (g, m) => {
     const gr = g.createRadialGradient(m, m, 0, m, m, m);
-    gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(.22, "rgba(255,252,246,.95)");
-    gr.addColorStop(.45, rgba(color, .55)); gr.addColorStop(1, rgba(color, 0));
+    if (light) {
+      gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(.16, "rgba(255,255,255,1)");
+      gr.addColorStop(.3, rgba(color, 1)); gr.addColorStop(.55, rgba(color, .45)); gr.addColorStop(1, rgba(color, 0));
+    } else {
+      gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(.22, "rgba(255,252,246,.95)");
+      gr.addColorStop(.45, rgba(color, .55)); gr.addColorStop(1, rgba(color, 0));
+    }
     g.fillStyle = gr; g.fillRect(0, 0, m * 2, m * 2);
   });
 
@@ -415,8 +423,7 @@
       const R = s.size * zs * easeOutBack(b) * (1 + 0.3 * s.foc);
       const color = colorOf(s.proj);
 
-      if (!light) drawStarDark(s, sx, sy, R, a, scint, color, t);
-      else drawStarLight(s, sx, sy, R, a, color, t);
+      drawStar(s, sx, sy, R, a, scint, color, t, light);
 
       // destello de nacimiento
       if (b < 1 && !reduced()) {
@@ -472,72 +479,34 @@
     }
   }
 
-  // Oscuro: estrella fotografiada — corona, picos de difracción y núcleo incandescente.
-  function drawStarDark(s, sx, sy, R, a, scint, color, t) {
-    ctx.globalCompositeOperation = "lighter";
+  // Estrella fotografiada: corona, picos de difracción y núcleo incandescente.
+  // En oscuro la luz se suma ("lighter"); en claro se tiñe sobre el blanco ("multiply").
+  function drawStar(s, sx, sy, R, a, scint, color, t, light) {
+    ctx.globalCompositeOperation = th.blend;
     const g = R * 11;
     ctx.globalAlpha = a * scint;
-    ctx.drawImage(halo(color, false), sx - g, sy - g, g * 2, g * 2);
+    ctx.drawImage(halo(color, light), sx - g, sy - g, g * 2, g * 2);
 
     const sp = clamp(s.spike + s.foc * 0.7, 0, 1.4);
     if (sp > 0.02) {
       const L = R * (5 + 9 * sp) * (0.92 + 0.08 * scint);
-      ctx.globalAlpha = a * Math.min(1, sp) * 0.85;
-      ctx.drawImage(spikes(color), sx - L, sy - L, L * 2, L * 2);
+      ctx.globalAlpha = a * Math.min(1, sp) * (light ? 0.7 : 0.85);
+      ctx.drawImage(spikes(color, light), sx - L, sy - L, L * 2, L * 2);
     }
 
     if (s.live && !reduced()) { // las sesiones de estos días laten
       const ph = ((t + s.pulsePhase) % 3.2) / 3.2;
-      ctx.globalAlpha = a * (1 - ph) * 0.35;
+      ctx.globalAlpha = a * (1 - ph) * (light ? 0.5 : 0.35);
       ctx.strokeStyle = color; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(sx, sy, R * (1.4 + ph * 5), 0, 6.283); ctx.stroke();
     }
 
+    ctx.globalCompositeOperation = light ? "source-over" : "lighter";
     const c = Math.max(2.4, R * 1.5);
     ctx.globalAlpha = Math.min(1, a + 0.25);
-    ctx.drawImage(core(color), sx - c, sy - c, c * 2, c * 2);
+    ctx.drawImage(core(color, light), sx - c, sy - c, c * 2, c * 2);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
-  }
-
-  // Claro: símbolo de carta celeste impresa — disco de tinta con margen de papel,
-  // cruz para las sesiones largas y anillo para las activas estos días.
-  function drawStarLight(s, sx, sy, R, a, color, t) {
-    const g = R * 9;
-    ctx.globalAlpha = a * 0.9;
-    ctx.drawImage(halo(color, true), sx - g, sy - g, g * 2, g * 2);
-
-    const rr = Math.max(1.9, R * 0.72);
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = rgba(th.bg, 1); // margen de papel que corta los hilos
-    ctx.beginPath(); ctx.arc(sx, sy, rr + 2.4, 0, 6.283); ctx.fill();
-
-    ctx.globalAlpha = lerp(0.2, 1, Math.min(1, a * 1.6));
-    ctx.fillStyle = color;
-    ctx.beginPath(); ctx.arc(sx, sy, rr, 0, 6.283); ctx.fill();
-
-    const sp = clamp(s.spike + s.foc * 0.7, 0, 1.4);
-    if (sp > 0.05) {
-      ctx.strokeStyle = color; ctx.lineWidth = 0.9;
-      const i0 = rr + 3.5, i1 = i0 + R * (0.6 + 1.6 * sp);
-      ctx.beginPath();
-      for (let q = 0; q < 4; q++) {
-        const an = q * Math.PI / 2 - Math.PI / 2;
-        ctx.moveTo(sx + Math.cos(an) * i0, sy + Math.sin(an) * i0);
-        ctx.lineTo(sx + Math.cos(an) * i1, sy + Math.sin(an) * i1);
-      }
-      ctx.stroke();
-    }
-    if (s.live) {
-      ctx.strokeStyle = color; ctx.lineWidth = 0.8;
-      ctx.beginPath(); ctx.arc(sx, sy, rr + 4.5, 0, 6.283); ctx.stroke();
-      if (!reduced()) {
-        const ph = ((t + s.pulsePhase) % 3.2) / 3.2;
-        ctx.globalAlpha = lerp(0.25, 1, a) * (1 - ph) * 0.5;
-        ctx.beginPath(); ctx.arc(sx, sy, rr + 4.5 + ph * R * 4, 0, 6.283); ctx.stroke();
-      }
-    }
-    ctx.globalAlpha = 1;
   }
 
   // ── interacción ──────────────────────────────────────────────
