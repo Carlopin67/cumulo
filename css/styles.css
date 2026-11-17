@@ -357,7 +357,9 @@ kbd { font-family: var(--font); font-size: 10px; color: var(--muted); border: 1p
 }
 .mdetail { font-size: 10px; color: var(--faint); text-align: right; font-variant-numeric: tabular-nums; margin-top: 3px; }
 .limits { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
-.lim-h { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 2px; font-size: 10.5px; color: var(--muted); }
+.lim-h { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 2px; font-size: 10.5px; color: var(--muted); white-space: nowrap; min-width: 0; }
+.lim-h .mon-sub { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ctx-btn { flex: none; }
 .orbits { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 6px; align-items: center; padding: 4px 0 2px; }
 .orbit-cv { width: 110px; height: 110px; display: block; margin: -4px 0 -4px -6px; }
 .orbit-info { display: grid; gap: 12px; min-width: 0; }
@@ -377,6 +379,19 @@ kbd { font-family: var(--font); font-size: 10px; color: var(--muted); border: 1p
 .k-tick { width: 3px; height: 3px; border-radius: 50%; background: var(--muted); margin-left: 8px; }
 
 /* ventana de contexto: 100 casillas, 1 % cada una */
+.ctx-btn {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px;
+  border: 1px solid var(--line-2); border-radius: 4px; color: var(--muted); font-size: 10.5px;
+  transition: color var(--t-fast), background-color var(--t-fast), border-color var(--t-fast), opacity var(--t-fast);
+}
+.ctx-btn .ico { width: 11px; height: 11px; }
+.ctx-btn:hover:not(:disabled) { color: var(--ink); background: var(--hover); border-color: var(--line-2); }
+.ctx-btn:disabled { opacity: .45; cursor: default; }
+.ctx-btn.busy { opacity: 1; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.ctx-btn.busy .ico { animation: squeeze 1s var(--ease-io) infinite; }
+@keyframes squeeze { 50% { transform: scaleY(.6); } }
+.ctx-grid i.drain { animation: ctxDrain .7s var(--ease-out) backwards; animation-delay: var(--d, 0ms); }
+@keyframes ctxDrain { 0% { background: var(--accent); transform: scale(1); } 40% { transform: scale(.5); } }
 .ctx-sum { display: flex; align-items: baseline; gap: 2px; padding: 2px 2px 8px; font-variant-numeric: tabular-nums; }
 .ctx-used { font-weight: 500; font-size: 12.5px; transition: color var(--t-med); }
 .ctx-of, .ctx-pct { font-size: 10px; color: var(--muted); }

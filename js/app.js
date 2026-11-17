@@ -891,6 +891,31 @@
   }
 
   $("sBack").onclick = closeSession;
+
+  // compactar la conversación desde el botón de la ventana de contexto (equivale a /compact)
+  const ctxBtn = $("ctxCompact");
+  ctxBtn.addEventListener("click", async () => {
+    const m = window.cumuloMonitor;
+    if (!m || ctxBtn.classList.contains("busy")) return;
+    if (streaming) streaming.stop();
+    const label = ctxBtn.querySelector("span");
+    ctxBtn.classList.add("busy"); ctxBtn.disabled = true; label.textContent = "Compactando…";
+    const id = ++run;
+    const b = block({ prompt: "Compactar conversación" });
+    b.el.querySelector(".b-cmd .p").textContent = "⇣";
+    b.el.classList.add("running");
+    const thinking = outLine(b.out, "", "thinking");
+    thinking.innerHTML = `<span class="spin">✻</span> Resumiendo la conversación…\n`;
+    await wait(1700);
+    thinking.remove(); b.el.classList.remove("running");
+    const r = m.compact();
+    if (r && id === run) {
+      outLine(b.out, `Conversación compactada: los mensajes pasan de ${r.before} a ${r.after} tokens (${r.freed} liberados).`);
+      outLine(b.out, "El resumen se queda como contexto; puedes seguir donde lo dejaste.", "d");
+    }
+    ctxBtn.classList.remove("busy"); label.textContent = "Compactar";
+    m.addMessage(0, 0); // recalcula si el botón debe quedar activo
+  });
   $("sCopy").onclick = () => {
     if (!current) return;
     copy($("sCopy"), current.s ? resumeCmd(current.s) : `cd "${current.proj ? current.proj.path : "."}" && claude`);

@@ -437,7 +437,14 @@
         if (!fresh && was !== c.k) { el.classList.remove("pop"); void el.offsetWidth; el.classList.add("pop"); }
       }
     });
-    for (; i < 100 - reserveN; i++) { cells[i].dataset.k = "free"; cells[i].style.removeProperty("--a"); }
+    for (; i < 100 - reserveN; i++) {
+      const el = cells[i], was = el.dataset.k;
+      el.dataset.k = "free"; el.style.removeProperty("--a");
+      if (!fresh && was && was !== "free") { el.classList.remove("pop", "drain"); void el.offsetWidth; el.classList.add("drain"); el.style.setProperty("--d", `${(i % 20) * 12}ms`); }
+    }
+    const btn = document.getElementById("ctxCompact");
+    // solo tiene sentido si hay al menos 15k de mensajes nuevos desde la última compactación
+    if (btn && !btn.classList.contains("busy")) btn.disabled = ctx.messages - (ctx.compactedAt || 0) < 15000;
     for (; i < 100; i++) { cells[i].dataset.k = "reserve"; cells[i].style.removeProperty("--a"); }
     if (fresh) {
       ctxEl.classList.remove("enter"); void ctxEl.offsetWidth; ctxEl.classList.add("enter");
@@ -454,6 +461,14 @@
         messages: Math.min(700000, msgs * 4200 + (seed % 11) * 1800), // sesiones largas llenan bastante más
       };
       renderContext(true);
+    },
+    // compactar: los mensajes se sustituyen por un resumen (~7 % de lo que ocupaban)
+    compact() {
+      if (!ctx) return null;
+      const before = ctx.messages, after = Math.max(3000, Math.round(before * 0.07));
+      ctx.messages = after; ctx.compactedAt = after;
+      renderContext(false);
+      return { before: kfmt(before), after: kfmt(after), freed: kfmt(before - after) };
     },
     addMessage(chars, images) {
       if (!ctx) return;
