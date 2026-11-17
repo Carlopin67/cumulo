@@ -10,7 +10,9 @@ const pty = require("@lydell/node-pty");
 const si = require("systeminformation");
 const sesiones = require("./sesiones");
 
-const WEB = path.join(__dirname, "..");
+const WEB = app.isPackaged ? path.join(__dirname, "web") : path.join(__dirname, "..");
+const XTERM = path.relative(WEB, path.join(__dirname, "node_modules", "@xterm")).split(path.sep).join("/");
+ipcMain.on("app:paths", e => { e.returnValue = { xterm: XTERM }; });
 const CLAUDE_DIR = path.join(os.homedir(), ".claude");
 const ESTADO = path.join(CLAUDE_DIR, "cumulo-estado.json");
 const CFG_FILE = () => path.join(app.getPath("userData"), "ajustes.json");

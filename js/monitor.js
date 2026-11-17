@@ -56,7 +56,7 @@
   const ROWS = [
     { k: "cpu", label: "CPU", pct: d => d.cpu.usage, value: d => [f0.format(d.cpu.usage), " %"],
       spark: d => d.cpu.usage, max: () => 100,
-      detail: d => `${d.cpu.cores} núcleos · ${f1.format(d.cpu.ghz)} GHz${d.cpu.temp ? ` · ${f0.format(d.cpu.temp)} °C` : ""}` },
+      detail: d => `${Math.round(d.cpu.cores)} núcleos · ${f1.format(d.cpu.ghz)} GHz${d.cpu.temp ? ` · ${f0.format(d.cpu.temp)} °C` : ""}` },
     { k: "ram", label: "RAM", pct: d => d.ram.used / d.ram.total * 100, value: d => [f1.format(d.ram.used), ` / ${f0.format(d.ram.total)} GB`],
       spark: d => d.ram.used / d.ram.total * 100, max: () => 100,
       detail: d => `${f1.format(d.ram.total - d.ram.used)} GB libres` },

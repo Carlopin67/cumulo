@@ -48,7 +48,7 @@ function limits() {
 if (live.limits) contextBridge.exposeInMainWorld("CUMULO_LIMITS", { read: () => limits() });
 
 contextBridge.exposeInMainWorld("cumuloDesktop", {
-  xtermDir: "desktop/node_modules/@xterm",
+  xtermDir: ipcRenderer.sendSync("app:paths").xterm,
   term: {
     open: opts => ipcRenderer.invoke("term:open", opts),
     write: (key, d) => ipcRenderer.send("term:write", key, d),

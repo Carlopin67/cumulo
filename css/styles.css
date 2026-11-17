@@ -3,6 +3,9 @@
    bloques y editor fijo abajo de Warp, monitor tipo btop. Superficies sólidas, filetes finos,
    radio pequeño, una sola familia monoespaciada. */
 
+/* fuente incluida en la app: funciona sin internet */
+@font-face { font-family: "Martian Mono"; src: url("../fonts/MartianMono.ttf") format("truetype"); font-weight: 100 800; font-stretch: 75% 112.5%; font-display: swap; }
+
 /* ── tokens ─────────────────────────────────────────────────── */
 :root {
   /* cursor oscuro propio (flecha, flecha de enlace con anillo de acento y barra de texto) */

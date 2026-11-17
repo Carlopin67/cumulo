@@ -7,15 +7,62 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "datos": "node generar-datos.js"
+    "datos": "node generar-datos.js",
+    "instalador": "electron-builder --win nsis"
   },
   "devDependencies": {
-    "electron": "^45.3.4"
+    "electron": "^45.3.4",
+    "electron-builder": "^26.18.0"
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.18",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "systeminformation": "^5.33.23"
+  },
+  "author": "Carlos López Pineda",
+  "build": {
+    "appId": "es.carlopin.cumulo",
+    "productName": "Cúmulo",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "sesiones.js",
+      "icono.png",
+      "node_modules/**/*",
+      {
+        "from": "..",
+        "to": "web",
+        "filter": [
+          "index.html",
+          "css/**",
+          "js/**",
+          "data/**",
+          "fonts/**"
+        ]
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/@lydell/**"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icono.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Cúmulo",
+      "installerIcon": "icono.ico",
+      "uninstallerIcon": "icono.ico",
+      "runAfterFinish": true
+    }
   }
 }
