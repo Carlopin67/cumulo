@@ -352,9 +352,9 @@
   // Cada plano se dibuja con su propia vista. El de detrás va a un lienzo aparte que se
   // compone desenfocado, más pequeño y más apagado (profundidad de campo).
   const off = document.createElement("canvas"), offCtx = off.getContext("2d");
-  const depthScale = d => lerp(1, 0.58, d);
-  const depthBlur = d => d * 7;
-  const depthAlpha = d => lerp(1, theme === "light" ? 0.55 : 0.45, d);
+  const depthScale = d => lerp(1, 0.7, d);
+  const depthBlur = d => d * 3.2;
+  const depthAlpha = d => lerp(1, theme === "light" ? 0.78 : 0.8, d);
   const drift = { x: 0, y: 0 }, lastCam = { x: 0, y: 0, z: 1 }; // paralaje del polvo, continuo al cambiar de plano
   let shift = null; // transición entre planos en curso
 
@@ -438,7 +438,7 @@
       ctx = mainCtx;
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
       ctx.globalCompositeOperation = "source-over";
-      ctx.filter = `blur(${depthBlur(d).toFixed(2)}px) saturate(${lerp(1, 0.7, d).toFixed(2)})`;
+      ctx.filter = `blur(${depthBlur(d).toFixed(2)}px) saturate(${lerp(1, 0.85, d).toFixed(2)})`;
       ctx.globalAlpha = depthAlpha(d);
       ctx.drawImage(off, 0, 0, W, H);
       ctx.filter = "none"; ctx.globalAlpha = 1;
@@ -549,8 +549,9 @@
       // titileo según la actividad: las de estos días centellean, las viejas casi no se mueven
       const tw = still ? 0 : Math.sin(t * 1.3 * s.twSp + s.twinkle) * Math.sin(t * 0.71 * s.twSp + s.twinkle * 2);
       const scint = 1 - s.twAmp * 0.5 + s.twAmp * 0.5 * tw;
-      const a = s.glow * lerp(1, 0.18, s.dim) * easeOutCubic(b);
-      const R = s.size * zs * easeOutBack(b) * (1 + 0.3 * s.foc);
+      // en el plano de atrás se compensa el desenfoque: hasta las viejas aportan luz al cúmulo
+      const a = Math.min(1, s.glow * lerp(1, 1.7, d)) * lerp(1, 0.18, s.dim) * easeOutCubic(b);
+      const R = s.size * zs * easeOutBack(b) * (1 + 0.3 * s.foc) * lerp(1, 1.25, d);
       const color = colorOf(s.proj);
 
       drawStar(s, sx, sy, R, a, scint, color, t, light);
