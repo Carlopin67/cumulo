@@ -722,19 +722,33 @@ html:not(.fullscreen) .win-ctl .fs-in { display: inline; }
 .app-item .x .ico { width: 10px; height: 10px; }
 .app-item:hover .x { display: grid; place-items: center; }
 .app-item .x:hover { color: var(--crit); }
-/* modelo y esfuerzo (solo en sesiones reales de Claude) */
-.claude-box { display: none; padding: 4px 2px 14px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
+/* modelo y esfuerzo (solo en sesiones reales de Claude): mismo lenguaje que las filas del monitor,
+   sin cajas; el acento solo marca lo elegido */
+.claude-box { display: none; padding: 0 0 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
 html.desktop .session.real:not(.shell) .claude-box { display: block; }
-.claude-box .lim-h { margin-bottom: 10px; }
-.cb-row { display: grid; gap: 6px; margin-bottom: 10px; }
-.cb-lbl { font-size: 10px; color: var(--faint); }
-.seg { display: flex; padding: 2px; gap: 2px; background: var(--field); border: 1px solid var(--line); border-radius: 6px; }
-.seg button { flex: 1 1 0; min-width: 0; height: 24px; padding: 0 4px; border-radius: 4px; font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color var(--t-fast), background var(--t-fast); }
-.seg button:hover:not(:disabled) { color: var(--ink); }
-.seg button[aria-checked="true"] { color: var(--ink); background: var(--bg); box-shadow: 0 0 0 1px var(--line-2); }
-.seg button[aria-checked="true"]::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 5px; border-radius: 50%; background: var(--accent); vertical-align: 1px; }
-.seg button:disabled { opacity: .45; cursor: var(--cur); }
-.seg.pending button[aria-checked="true"]::before { background: var(--muted); }
-.cb-tip { font-size: 10.5px; line-height: 1.5; color: var(--muted); }
-.cb-tip b { font-weight: 500; color: var(--ok); }
-.cb-tip.warn b { color: var(--warn); } .cb-tip.crit b { color: var(--crit); }
+.claude-box .lim-h .live { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.cb-row { grid-template-rows: auto auto auto; padding: 6px 0 6px; }
+.cb-row .mval b { transition: color var(--t-med), opacity var(--t-med); }
+.claude-box.pending-model #cbModelVal, .claude-box.pending-effort #cbEffortVal { opacity: .5; }
+/* modelos: palabras sueltas; la elegida en tinta con un filete de acento debajo */
+.cb-models { display: flex; justify-content: space-between; margin-top: 8px; border-bottom: 1px solid var(--line); }
+.cb-models button { position: relative; padding: 2px 0 7px; font-size: 10.5px; color: var(--faint); transition: color var(--t-fast); }
+.cb-models button:hover:not(:disabled) { color: var(--ink-2); }
+.cb-models button[aria-checked="true"] { color: var(--ink); }
+.cb-models button[aria-checked="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1.5px; background: var(--accent); }
+/* esfuerzo: cinco puntos sobre una línea (como los de las órbitas); la línea se llena hasta el elegido */
+.cb-scale { position: relative; display: flex; justify-content: space-between; align-items: center; height: 22px; margin: 6px 3px 0; }
+.cb-track { position: absolute; left: 4px; right: 4px; top: 50%; height: 1px; background: var(--line-2); }
+.cb-track i { position: absolute; left: 0; top: 0; height: 1px; width: calc(var(--k, 0) * 25%); background: var(--ink-2); transition: width var(--t-med) var(--ease-out); }
+.cb-scale button { position: relative; z-index: 1; display: grid; place-items: center; width: 18px; height: 22px; }
+.cb-scale button::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--bg); box-shadow: 0 0 0 1px var(--line-2); transition: transform var(--t-fast), background var(--t-fast), box-shadow var(--t-fast); }
+.cb-scale button.on::before { background: var(--ink-2); box-shadow: 0 0 0 1px var(--ink-2); }
+.cb-scale button:hover:not(:disabled)::before { transform: scale(1.4); }
+.cb-scale button[aria-checked="true"]::before { width: 7px; height: 7px; background: var(--accent); box-shadow: 0 0 0 3px var(--bg), 0 0 0 4px var(--accent); }
+.cb-ends { display: flex; justify-content: space-between; text-align: left; margin-top: 2px; }
+.claude-box button:disabled { cursor: var(--cur); opacity: .45; }
+.cb-tip { margin-top: 6px; font-size: 10px; line-height: 1.6; color: var(--faint); }
+.cb-tip b { font-weight: 500; color: var(--ink-2); }
+.cb-tip b::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 6px; border-radius: 50%; background: var(--ok); vertical-align: 1px; }
+.cb-tip.warn b::before { background: var(--warn); } .cb-tip.crit b::before { background: var(--crit); }
+.cb-tip.crit b { color: var(--crit); }

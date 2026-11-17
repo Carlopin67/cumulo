@@ -142,49 +142,62 @@
 
   // ── modelo y esfuerzo de la sesión abierta (en vez de escribir /model y /effort) ──
   const MODELS = [
-    { id: "claude-opus-5-5", name: "Opus", rx: /opus/i },
-    { id: "claude-sonnet-5-5", name: "Sonnet", rx: /sonnet/i },
-    { id: "claude-haiku-5-5", name: "Haiku", rx: /haiku/i },
-    { id: "claude-fable-5-2", name: "Fable", rx: /fable/i },
+    { id: "claude-opus-5-5", name: "Opus", label: "Opus 5.5", rx: /opus/i },
+    { id: "claude-sonnet-5-5", name: "Sonnet", label: "Sonnet 5.5", rx: /sonnet/i },
+    { id: "claude-haiku-5-5", name: "Haiku", label: "Haiku 5.5", rx: /haiku/i },
+    { id: "claude-fable-5-2", name: "Fable", label: "Fable 5.2", rx: /fable/i },
   ];
   const EFFORTS = [["low", "Bajo"], ["medium", "Medio"], ["high", "Alto"], ["xhigh", "Muy alto"], ["max", "Máximo"]];
+  const cbBox = document.getElementById("claudeBox");
+  const cbModelVal = document.getElementById("cbModelVal"), cbEffortVal = document.getElementById("cbEffortVal");
   const cbModel = document.getElementById("cbModel"), cbEffort = document.getElementById("cbEffort");
   const cbTip = document.getElementById("cbTip"), cbSub = document.getElementById("cbSub");
   const fmtK = n => n >= 1e6 ? (n / 1e6).toFixed(2).replace(".", ",") + " M" : n >= 1e3 ? Math.round(n / 1e3) + " mil" : String(n);
   let wanted = null; // lo que acabas de elegir, hasta que Claude lo confirme
   function segButtons(box, items, kind) {
-    box.innerHTML = "";
+    box.querySelectorAll("button").forEach(b => b.remove());
     items.forEach(([val, label, title]) => {
-      const b = document.createElement("button"); b.type = "button"; b.role = "radio"; b.dataset.v = val; b.textContent = label;
-      if (title) b.title = title;
+      const b = document.createElement("button"); b.type = "button"; b.role = "radio"; b.dataset.v = val;
+      if (kind === "model") b.textContent = label; else b.setAttribute("aria-label", label);
+      b.title = title || label;
       b.setAttribute("aria-checked", "false");
       b.onclick = () => choose(kind, val);
       box.append(b);
     });
   }
   segButtons(cbModel, MODELS.map(m => [m.id, m.name, m.id]), "model");
-  segButtons(cbEffort, EFFORTS.map(([v, l]) => [v, l, `/effort ${v}`]), "effort");
-  function mark(box, val) { [...box.children].forEach(b => b.setAttribute("aria-checked", String(b.dataset.v === val))); }
+  segButtons(cbEffort, EFFORTS.map(([v, l]) => [v, l, l]), "effort");
+  function mark(box, val) {
+    const bs = [...box.querySelectorAll("button")], k = bs.findIndex(b => b.dataset.v === val);
+    bs.forEach((b, i) => { b.setAttribute("aria-checked", String(i === k)); b.classList.toggle("on", k >= 0 && i < k); });
+    if (box === cbEffort) {
+      box.style.setProperty("--k", Math.max(0, k));
+      cbEffortVal.textContent = k >= 0 ? EFFORTS[k][1] : "—";
+    } else {
+      const m = MODELS.find(x => x.id === val);
+      cbModelVal.textContent = m ? m.label : "—";
+    }
+  }
   function choose(kind, val) {
     if (!active || active.exited) return;
     if (active.busy) { cbSub.textContent = "espera a que termine"; return; }
     D.term.write(active.key, kind === "model" ? `/model ${val}\r` : `/effort ${val}\r`);
     wanted = { kind, val, at: Date.now() };
     mark(kind === "model" ? cbModel : cbEffort, val);
-    (kind === "model" ? cbModel : cbEffort).classList.add("pending");
+    cbBox.classList.add("pending-" + kind);
     active.xt.focus();
   }
   function claudeBox(t, c, status) {
     t.busy = status === "busy";
-    [...cbModel.children, ...cbEffort.children].forEach(b => { b.disabled = t.busy; });
+    cbBox.querySelectorAll("button").forEach(b => { b.disabled = t.busy; });
     cbSub.textContent = t.busy ? "trabajando…" : "";
     if (c) {
       const m = MODELS.find(x => x.rx.test(c.model || c.modelName || ""));
       const fresh = wanted && Date.now() - wanted.at < 8000;
-      if (!(fresh && wanted.kind === "model") && m) { mark(cbModel, m.id); cbModel.classList.remove("pending"); }
-      if (!(fresh && wanted.kind === "effort") && c.effort) { mark(cbEffort, c.effort); cbEffort.classList.remove("pending"); }
-      if (fresh && wanted.kind === "model" && m && m.id === wanted.val) cbModel.classList.remove("pending");
-      if (fresh && wanted.kind === "effort" && c.effort === wanted.val) cbEffort.classList.remove("pending");
+      if (!(fresh && wanted.kind === "model") && m) { mark(cbModel, m.id); cbBox.classList.remove("pending-model"); }
+      if (!(fresh && wanted.kind === "effort") && c.effort) { mark(cbEffort, c.effort); cbBox.classList.remove("pending-effort"); }
+      if (fresh && wanted.kind === "model" && m && m.id === wanted.val) cbBox.classList.remove("pending-model");
+      if (fresh && wanted.kind === "effort" && c.effort === wanted.val) cbBox.classList.remove("pending-effort");
       const n = c.tokens || 0;
       cbTip.className = "cb-tip" + (n >= 400000 ? " crit" : n >= 150000 ? " warn" : "");
       cbTip.innerHTML = n >= 400000

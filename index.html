@@ -155,9 +155,17 @@
       <aside id="monitor" class="monitor" aria-label="Monitor del sistema">
         <!-- app instalable: modelo y esfuerzo de la sesión, sin escribir comandos -->
         <section id="claudeBox" class="claude-box" aria-label="Modelo y esfuerzo">
-          <p class="lim-h"><span class="mon-name">Claude</span><span id="cbSub" class="mon-sub"></span></p>
-          <div class="cb-row"><span class="cb-lbl">Modelo</span><div id="cbModel" class="seg" role="radiogroup" aria-label="Modelo"></div></div>
-          <div class="cb-row"><span class="cb-lbl">Esfuerzo</span><div id="cbEffort" class="seg" role="radiogroup" aria-label="Esfuerzo"></div></div>
+          <p class="lim-h"><span class="live" aria-hidden="true"></span><span class="mon-name">Claude</span><span id="cbSub" class="mon-sub"></span></p>
+          <!-- mismo patrón que las filas del monitor: etiqueta, valor grande y debajo el control -->
+          <div class="mrow cb-row">
+            <div class="mtop"><span class="mlabel mono">Modelo</span><span class="mval"><b id="cbModelVal">—</b></span></div>
+            <div id="cbModel" class="cb-models" role="radiogroup" aria-label="Modelo"></div>
+          </div>
+          <div class="mrow cb-row">
+            <div class="mtop"><span class="mlabel mono">Esfuerzo</span><span class="mval"><b id="cbEffortVal">—</b></span></div>
+            <div id="cbEffort" class="cb-scale" role="radiogroup" aria-label="Esfuerzo"><span class="cb-track" aria-hidden="true"><i></i></span></div>
+            <p class="mdetail cb-ends"><span>menos plan</span><span>más a fondo</span></p>
+          </div>
           <p id="cbTip" class="cb-tip"></p>
         </section>
         <button id="monToggle" class="mon-head" aria-expanded="true" aria-controls="monRows">
