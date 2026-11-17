@@ -10,7 +10,7 @@
   const PAL_DARK = ["#9fbaff", "#ffd29a", "#cddaff", "#ffae78", "#efeaff", "#ffe2bd", "#8fa9f2", "#ffc08a"];
   const PAL_LIGHT = ["#3d6bff", "#ff9a2e", "#6f8cff", "#ff6a3a", "#8a6cff", "#ffb23e", "#2f7dff", "#ff7f45"];
 
-  const FONT_DISPLAY = "'Bricolage Grotesque', system-ui, sans-serif";
+  const FONT_DISPLAY = "'Martian Mono', ui-monospace, monospace";
   const FONT_MONO = "'Martian Mono', ui-monospace, monospace";
 
   // ── utilidades ──────────────────────────────────────────────
@@ -466,9 +466,9 @@
       const [sx, sy] = toScreen(s.x, s.y);
       const off = s.size * zs * 4 + 16 + (1 - s.la) * -8;
       ctx.textAlign = "left";
-      ctx.font = `500 17px ${FONT_DISPLAY}`;
-      if ("fontStretch" in ctx) ctx.fontStretch = "semi-condensed";
-      if ("letterSpacing" in ctx) ctx.letterSpacing = "-0.3px";
+      ctx.font = `500 14px ${FONT_DISPLAY}`;
+      if ("fontStretch" in ctx) ctx.fontStretch = "ultra-condensed";
+      if ("letterSpacing" in ctx) ctx.letterSpacing = "-0.6px";
       ctx.fillStyle = rgba(th.ink, 0.96 * s.la);
       ctx.fillText(s.title, sx + off, sy + 1);
       if ("fontStretch" in ctx) ctx.fontStretch = "normal";
@@ -671,7 +671,7 @@
 
   // ── sesión a pantalla completa (simulada) ────────────────────
   // En la versión instalable, aquí se abrirá la terminal real con la sesión.
-  const sessionEl = $("session"), sLog = $("sLog"), sScroll = $("sScroll"), sInput = $("sInput");
+  const sessionEl = $("session"), sLog = $("sLog"), sScroll = $("sScroll"), sInput = $("sInput"), sForm = $("sForm");
   let current = null, camBefore = null, typing = 0, clipAnim = null;
 
   function addLine(cls, text, typed) {
@@ -699,7 +699,11 @@
       await addLine(cls, text, typed);
       await new Promise(r => setTimeout(r, reduced() ? 0 : (typed ? 260 : 110)));
     }
-    if (run === typing) sLog.insertAdjacentHTML("beforeend", `<span class="line"><span class="p">›</span> <span class="cursor"></span></span>`);
+    if (run === typing) {
+      sForm.classList.add("ready");
+      sInput.focus({ preventScroll: true });
+      sScroll.scrollTop = sScroll.scrollHeight;
+    }
   }
 
   function openSession(s, origin) {
@@ -712,7 +716,7 @@
       ? `${s.messages} mensajes · empezada ${fmtDate(s.started)} · última vez ${ago(s.lastActive)}`
       : (proj ? proj.path : "");
     $("sId").textContent = s ? s.id : "sin guardar todavía";
-    sLog.innerHTML = ""; sInput.value = "";
+    sLog.innerHTML = ""; sInput.value = ""; sForm.classList.remove("ready");
 
     // la cámara se zambulle en la estrella mientras se abre la vista
     camBefore = { x: cam.x, y: cam.y, z: cam.z };
@@ -730,7 +734,6 @@
         { duration: 760, easing: "cubic-bezier(.65,0,.35,1)" }
       );
     }
-    setTimeout(() => sInput.focus({ preventScroll: true }), reduced() ? 0 : 700);
 
     const lines = s ? [
       ["cmd", `PS ${s.project}> claude --resume ${s.id}`, true],
@@ -774,6 +777,10 @@
   }
 
   $("sBack").onclick = closeSession;
+  // clic en cualquier parte de la terminal: escribir (sin robar una selección de texto)
+  sScroll.addEventListener("click", () => {
+    if (sForm.classList.contains("ready") && !String(window.getSelection())) sInput.focus({ preventScroll: true });
+  });
   $("sCopy").onclick = () => {
     if (!current) return;
     copy($("sCopy"), current.s ? resumeCmd(current.s) : `cd "${current.proj ? current.proj.path : "."}" && claude`);
@@ -782,12 +789,10 @@
     e.preventDefault();
     const text = sInput.value.trim(); if (!text) return;
     sInput.value = "";
-    const cur = sLog.querySelector(".cursor"); if (cur) cur.parentElement.remove();
     typing++;
     await addLine("you", `› ${text}`);
     await new Promise(r => setTimeout(r, reduced() ? 0 : 380));
     await addLine("d", "  (Simulación: Claude respondería aquí.)");
-    sLog.insertAdjacentHTML("beforeend", `<span class="line"><span class="p">›</span> <span class="cursor"></span></span>`);
     sScroll.scrollTop = sScroll.scrollHeight;
   });
 
