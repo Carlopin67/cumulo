@@ -1,4 +1,4 @@
-// Monitor del sistema — tarjeta arriba a la derecha con CPU, RAM, VRAM, almacenamiento, red y Claude.
+// Monitor del sistema — columna de la sesión con CPU, RAM, VRAM, disco, red y Claude, y debajo los límites de uso.
 // Los datos salen de window.CUMULO_SYSTEM.read(). Si no existe, se usan datos simulados.
 // Forma de cada lectura (lo único que tendrá que dar la versión instalable):
 //   { cpu:   { usage %, cores, ghz, temp °C },
@@ -208,10 +208,135 @@
     if (RM.matches) { shown = d; render(d); }
   }
 
+  // ── límites de uso de Claude (ventana de 5 h y semanal) ─────
+  // Datos de window.CUMULO_LIMITS.read() si existe; si no, simulados. Forma:
+  //   { session: { used 0–1, start ms, end ms, history: [[ms, used], …] },
+  //     weekly:  { used 0–1, start ms, end ms, history: [[ms, used], …] } }
+  function limitsSimulator() {
+    const H = 3600e3, D = 24 * H, now0 = Date.now();
+    const mk = (start, end, used, steps) => {
+      const hist = []; let u = 0;
+      const span = now0 - start;
+      for (let i = 0; i <= steps; i++) {
+        const t = start + span * i / steps;
+        if (i) u += Math.random() < 0.55 ? Math.random() * (used / steps) * 2.2 : 0; // tramos de trabajo y pausas
+        hist.push([t, u]);
+      }
+      const k = used / (u || 1); hist.forEach(p => { p[1] *= k; });
+      return { start, end, used, history: hist };
+    };
+    // la ventana de 5 h empezó hace 2 h 46 min; la semana, el lunes a las 9:00
+    const sStart = now0 - (2 * H + 46 * 60e3);
+    const monday = new Date(now0); monday.setHours(9, 0, 0, 0);
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    if (monday.getTime() > now0) monday.setDate(monday.getDate() - 7);
+    const st = { session: mk(sStart, sStart + 5 * H, 0.42, 40), weekly: mk(monday.getTime(), monday.getTime() + 7 * D, 0.17, 60) };
+    return {
+      read() {
+        const now = Date.now();
+        for (const k of ["session", "weekly"]) {
+          const l = st[k];
+          if (Math.random() < 0.25) l.used = Math.min(1, l.used + Math.random() * (k === "session" ? 0.004 : 0.0012));
+          const lastP = l.history[l.history.length - 1];
+          if (now - lastP[0] > (l.end - l.start) / 80) l.history.push([now, l.used]); else lastP[1] = l.used;
+        }
+        return st;
+      },
+    };
+  }
+  const limitsSource = window.CUMULO_LIMITS || limitsSimulator();
+  const limitsEl = document.getElementById("monLimits");
+  document.getElementById("limSub").textContent = window.CUMULO_LIMITS ? "" : "simulado";
+  const LIMITS = [
+    { k: "session", label: "Sesión · 5 h" },
+    { k: "weekly", label: "Semanal" },
+  ];
+  LIMITS.forEach(L => {
+    const d = document.createElement("div"); d.className = "mrow lrow";
+    d.innerHTML = `
+      <div class="mtop"><span class="mlabel"></span><span class="mval"><b></b><small> %</small></span></div>
+      <canvas class="spark lspark" aria-hidden="true"></canvas>
+      <p class="mdetail ldetail"><span class="lproj"></span><span class="lreset"></span></p>`;
+    d.querySelector(".mlabel").textContent = L.label;
+    L.el = d; L.b = d.querySelector("b"); L.canvas = d.querySelector("canvas");
+    L.proj = d.querySelector(".lproj"); L.reset = d.querySelector(".lreset");
+    limitsEl.appendChild(d);
+  });
+
+  const dur = ms => {
+    const m = Math.max(0, Math.round(ms / 60e3)), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mm = m % 60;
+    return d ? `${d} d ${h} h` : h ? `${h} h ${mm} min` : `${mm} min`;
+  };
+  let limits = null;
+  function readLimits() {
+    try { limits = limitsSource.read(); } catch (e) { return; }
+    const now = Date.now();
+    for (const L of LIMITS) {
+      const l = limits[L.k]; if (!l) continue;
+      const pct = l.used * 100;
+      L.b.textContent = f0.format(pct);
+      const elapsed = clamp((now - l.start) / (l.end - l.start), 0.02, 1);
+      L.projected = Math.min(1.5, l.used / elapsed);
+      L.proj.textContent = L.projected >= 1 ? "a este ritmo llegarás al límite" : `a este ritmo, ~${f0.format(L.projected * 100)} % al final`;
+      L.reset.textContent = `se reinicia en ${dur(l.end - now)}`;
+      const lvl = levelOf(Math.max(pct, L.projected >= 1 ? 75 : 0));
+      if (lvl !== L.level) { L.level = lvl; L.el.dataset.level = lvl; }
+    }
+  }
+
+  // gráfica: uso acumulado dentro de la ventana, línea del 100 %, marca de «ahora» y proyección punteada
+  function drawLimit(L) {
+    const l = limits && limits[L.k]; if (!l) return;
+    const c = L.canvas, w = c.clientWidth, h = c.clientHeight;
+    if (!w || !h) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+    const g = c.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+    const now = Date.now(), top = 5, pad = 4;
+    const x = t => pad + clamp((t - l.start) / (l.end - l.start), 0, 1) * (w - pad * 2);
+    const y = u => h - 1 - clamp(u, 0, 1.05) / 1.05 * (h - top - 2);
+    const col = colorFor(L.level || "");
+    const hs = l.history.concat([[now, l.used]]);
+
+    // 100 % y marcas de la ventana (cada hora / cada día)
+    g.strokeStyle = withAlpha(colors.ink, light ? 0.18 : 0.22); g.lineWidth = 1; g.setLineDash([2, 3]);
+    g.beginPath(); g.moveTo(pad, Math.round(y(1)) + 0.5); g.lineTo(w - pad, Math.round(y(1)) + 0.5); g.stroke();
+    g.setLineDash([]);
+    const step = L.k === "session" ? 3600e3 : 86400e3;
+    g.fillStyle = withAlpha(colors.ink, light ? 0.2 : 0.25);
+    for (let t = l.start; t <= l.end + 1; t += step) g.fillRect(Math.round(x(t)), h - 3, 1, 3);
+
+    // proyección al ritmo actual
+    const ex = x(l.end), ey = y(Math.min(1.05, L.projected || l.used));
+    g.strokeStyle = withAlpha(col, 0.45); g.setLineDash([1, 3]); g.lineWidth = 1.2;
+    g.beginPath(); g.moveTo(x(now), y(l.used)); g.lineTo(ex, ey); g.stroke(); g.setLineDash([]);
+
+    // área y línea del uso hasta ahora
+    const path = () => { g.beginPath(); hs.forEach(([t, u], i) => i ? g.lineTo(x(t), y(u)) : g.moveTo(x(t), y(u))); };
+    const grad = g.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, withAlpha(col, light ? 0.18 : 0.26)); grad.addColorStop(1, withAlpha(col, 0));
+    path(); g.lineTo(x(now), h); g.lineTo(x(l.start), h); g.closePath(); g.fillStyle = grad; g.fill();
+    g.lineJoin = "round"; g.lineCap = "round";
+    path(); g.strokeStyle = withAlpha(col, light ? 0.12 : 0.22); g.lineWidth = 5; g.stroke();
+    path(); g.strokeStyle = col; g.lineWidth = 1.2; g.stroke();
+
+    // ahora
+    const nx = x(now), ny = y(l.used), t = performance.now() / 1000;
+    g.strokeStyle = withAlpha(colors.ink, light ? 0.15 : 0.2); g.lineWidth = 1;
+    g.beginPath(); g.moveTo(Math.round(nx) + 0.5, top); g.lineTo(Math.round(nx) + 0.5, h); g.stroke();
+    const glow = g.createRadialGradient(nx, ny, 0, nx, ny, 9);
+    glow.addColorStop(0, withAlpha(col, (light ? 0.14 : 0.4) + 0.1 * Math.sin(t * 2.4))); glow.addColorStop(1, withAlpha(col, 0));
+    g.fillStyle = glow; g.fillRect(nx - 10, ny - 10, 20, 20);
+    g.fillStyle = col; g.beginPath(); g.arc(nx, ny, 2, 0, 6.283); g.fill();
+  }
+
   const sessionEl = document.getElementById("session");
   let last = 0;
   function loop(now) {
-    const visible = open && sessionEl && (sessionEl.classList.contains("open") || sessionEl.classList.contains("closing"));
+    const inSession = sessionEl && (sessionEl.classList.contains("open") || sessionEl.classList.contains("closing"));
+    if (inSession) LIMITS.forEach(drawLimit);
+    const visible = open && inSession;
     if (visible && target) {
       const dt = Math.min(0.1, (now - last) / 1000 || 0.016);
       if (!RM.matches) { shown = lerpSnap(shown, target, 1 - Math.exp(-dt * 6)); render(shown); }
@@ -224,7 +349,7 @@
 
   // historia inicial para que las gráficas no empiecen vacías
   for (let i = 0; i < HIST - 1; i++) { try { push(source.read()); } catch (e) { break; } }
-  tick();
-  setInterval(() => { if (!document.hidden) tick(); }, 1000);
+  tick(); readLimits();
+  setInterval(() => { if (!document.hidden) { tick(); readLimits(); } }, 1000);
   requestAnimationFrame(loop);
 })();
