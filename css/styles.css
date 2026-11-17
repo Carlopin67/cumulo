@@ -194,11 +194,10 @@ kbd { font-family: var(--font); font-size: 10px; color: var(--muted); border: 1p
 @keyframes dockIn { from { opacity: 0; translate: 0 6px; } }
 .dock-item:hover { color: var(--ink); background: var(--hover); }
 .dock-item .t { overflow: hidden; text-overflow: ellipsis; }
-.dock-item .folder { --c: var(--cd); flex: none; width: 15px; height: 12px; }
-:root[data-theme="light"] .dock-item .folder { --c: var(--cl); }
-.folder .back { fill: color-mix(in srgb, var(--c) 30%, transparent); stroke: var(--c); stroke-width: 1; }
-.folder .front { fill: color-mix(in srgb, var(--c) 55%, var(--chrome)); stroke: var(--c); stroke-width: 1; transform-origin: 50% 100%; transition: transform .3s var(--ease-out); }
-.dock-item:hover .folder .front, .dock-item[aria-current="true"] .folder .front { transform: skewX(-8deg) scaleY(.86); } /* la carpeta se entreabre */
+.dock-item .kind { --c: var(--cd); flex: none; width: 15px; height: 13px; }
+:root[data-theme="light"] .dock-item .kind { --c: var(--cl); }
+.kind .frame { fill: color-mix(in srgb, var(--c) 14%, transparent); stroke: var(--c); stroke-width: 1.1; stroke-linejoin: round; }
+.kind .glyph { fill: none; stroke: var(--c); stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
 .dock-item[aria-current="true"] { color: var(--ink); }
 .dock-item[aria-current="true"]::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -3px; height: 2px; border-radius: 1px; background: var(--accent); }
 .dock-item .x { display: none; width: 14px; height: 14px; margin-right: -4px; border-radius: 3px; place-items: center; color: var(--faint); }
@@ -206,15 +205,11 @@ kbd { font-family: var(--font); font-size: 10px; color: var(--muted); border: 1p
 .dock-item .x:hover { color: var(--ink); background: var(--line-2); }
 .dock-item .st { flex: none; font-size: 10px; }
 .dock-item[data-state="working"] .st::before { content: "✻"; display: inline-block; color: var(--accent); animation: spin 1.2s steps(6) infinite; }
-/* te necesita: parpadea en ámbar (te pregunta algo) o en verde (ha terminado) */
+/* te necesita: un punto fijo, ámbar si te pregunta algo y verde si ha terminado; sin parpadeos */
 .dock-item[data-state="ask"] { --att: var(--warn); }
 .dock-item[data-state="done"] { --att: var(--ok); }
-.dock-item[data-state="ask"], .dock-item[data-state="done"] { color: var(--ink); animation: dockIn .45s var(--ease-out) backwards, attention 1.6s ease-in-out infinite; }
-.dock-item[data-state="ask"] .st::before, .dock-item[data-state="done"] .st::before { content: ""; display: block; width: 6px; height: 6px; border-radius: 50%; background: var(--att); box-shadow: 0 0 8px var(--att); }
-@keyframes attention {
-  0%, 100% { background: transparent; box-shadow: none; }
-  50% { background: color-mix(in srgb, var(--att) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--att) 45%, transparent), 0 0 14px -2px color-mix(in srgb, var(--att) 45%, transparent); }
-}
+.dock-item[data-state="ask"], .dock-item[data-state="done"] { color: var(--ink); }
+.dock-item[data-state="ask"] .st::before, .dock-item[data-state="done"] .st::before { content: ""; display: block; width: 5px; height: 5px; border-radius: 50%; background: var(--att); }
 .dock-item.leaving { opacity: 0; translate: 0 6px; pointer-events: none; }
 
 /* bandeja: wifi y volumen · batería · fecha y hora (la información de la bandeja del sistema, con el estilo de la app) */

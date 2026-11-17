@@ -974,7 +974,7 @@
   // compositor con adjuntos de imagen y un botón que se convierte en «parar» mientras Claude responde.
   const sessionEl = $("session"), sLog = $("sLog"), sScroll = $("sScroll"), sInput = $("sInput"), sForm = $("sForm");
   const sMain = sessionEl.querySelector(".s-main"), sFile = $("sFile"), sAttach = $("sAttach"), sSend = $("sSend");
-  let current = null, camBefore = null, sAnim = null, enterTimer = 0, openTimer = 0;
+  let current = null, camBefore = null, sAnim = null, enterTimer = 0, openTimer = 0, closeTimer = 0;
 
   // posición de la etiqueta de una estrella en el mapa para una vista dada (igual que la dibuja el lienzo)
   function labelBox(s, view) {
@@ -1174,6 +1174,7 @@
 
   function openSession(s, origin) {
     const switching = sessionEl.classList.contains("open"); // cambio de sesión desde la barra inferior
+    if (closeTimer) { clearTimeout(closeTimer); closeTimer = 0; } // reabrir mientras la estrella volvía a su sitio
     const dk = s ? dockAdd(s) : null;
     const pending = dk && (dk.state === "ask" || dk.state === "done") ? dk.pending : null;
     if (dk) dockState(dk, "");
@@ -1263,7 +1264,7 @@
     if (streaming) {
       streaming.stop();
       const o = s && dockFind(s);
-      if (o) { // la respuesta sigue en segundo plano; la carpeta avisará cuando termine
+      if (o) { // la respuesta sigue en segundo plano; la barra avisará cuando termine
         dockState(o, "working");
         clearTimeout(o.timer);
         o.timer = setTimeout(() => dockState(o, "done", { kind: "done", text: `He terminado de responder en «${s.title}». Te dejo el resultado aquí y, si quieres, seguimos con el siguiente paso.` }), 4000 + Math.random() * 3000);
@@ -1273,11 +1274,27 @@
     let [x, y] = s ? toScreen(s.x, s.y) : [W / 2, H / 2];
     if (!s) { const b = $("newSession").getBoundingClientRect(); x = b.left + b.width / 2; y = b.top + b.height / 2; }
     sessionEl.classList.remove("open", "entering", "switching"); sessionEl.setAttribute("aria-hidden", "true");
-    document.body.classList.remove("diving");
     current = null; dockSync();
     const here = s && s.plane === P; // si la sesión es del otro plano, no hay estrella a la que volver
     document.body.classList.remove("session-open");
-    if (camBefore && here) flyTo(camBefore.x, camBefore.y, camBefore.z, { dur: 900, noPanel: true, noDip: true, ease: easeOutQuart });
+    // salida en dos tiempos (lo contrario de la entrada):
+    // 1) la cámara se aleja con la estrella fija en el centro mientras la luz vuelve a ella
+    // 2) ya terminada la transición, la estrella regresa a donde estaba y el inspector vuelve
+    const BACK = 1000;
+    const centered = camBefore && here ? { x: s.x, y: s.y, z: camBefore.z } : null;
+    clearTimeout(closeTimer);
+    if (centered && !reduced()) {
+      flyTo(centered.x, centered.y, centered.z, { dur: 900, noPanel: true, noDip: true, ease: easeOutQuart });
+      const cb = camBefore;
+      closeTimer = setTimeout(() => {
+        closeTimer = 0;
+        document.body.classList.remove("diving");
+        flyTo(cb.x, cb.y, cb.z, { dur: 560, noPanel: true, noDip: true, ease: easeInOutCubic });
+      }, BACK);
+    } else {
+      document.body.classList.remove("diving");
+      if (camBefore && here) flyTo(camBefore.x, camBefore.y, camBefore.z, { dur: 900, noPanel: true, noDip: true, ease: easeOutQuart });
+    }
     if (sAnim) { sAnim.cancel(); sAnim = null; }
     $("sTitle").style.opacity = "";
     if (reduced()) { labelHidden = null; return; }
@@ -1296,28 +1313,32 @@
         labelHidden = s;
         flyTitle(s.title,
           tabBox($("sTitle")),
-          { ...labelBox(s, camBefore), fs: 14, st: "75%", c: rgba(th.ink, 0.96) },
+          { ...labelBox(s, centered || camBefore), fs: 14, st: "75%", c: rgba(th.ink, 0.96) },
           780, 60
         ).then(() => { labelHidden = null; });
       } else labelHidden = null;
     }
     const back = s ? $("pResume") : $("newSession");
-    setTimeout(() => back.focus({ preventScroll: true }), 300);
+    setTimeout(() => back.focus({ preventScroll: true }), centered ? BACK + 300 : 300);
   }
 
   $("sBack").onclick = closeSession;
 
   // ── barra de tareas: una carpeta por sesión abierta ──────────
-  // Parpadea en ámbar si la sesión te pregunta algo y en verde si ha terminado de responder.
+  // Un punto ámbar si la sesión te pregunta algo y verde si ha terminado de responder.
   const dock = $("dock");
-  const FOLDER = `<svg class="folder" viewBox="0 0 15 12" aria-hidden="true"><path class="back" d="M1 2.1c0-.6.5-1.1 1.1-1.1h3.3l1.4 1.5h6c.6 0 1.1.5 1.1 1.1v7.3c0 .6-.5 1.1-1.1 1.1H2.1c-.6 0-1.1-.5-1.1-1.1z"/><path class="front" d="M1 4.4h13v6.5c0 .6-.5 1.1-1.1 1.1H2.1c-.6 0-1.1-.5-1.1-1.1z"/></svg>`;
+  const ICONS = {
+    code: `<svg class="kind" viewBox="0 0 16 14" aria-hidden="true"><rect class="frame" x=".7" y=".7" width="14.6" height="12.6" rx="2.2"/><path class="glyph" d="M4 5l2.4 2L4 9M8.2 9.4h3.6"/></svg>`,
+    ask: `<svg class="kind" viewBox="0 0 16 14" aria-hidden="true"><path class="frame" d="M3 .9h10a2.2 2.2 0 0 1 2.2 2.2v5.2A2.2 2.2 0 0 1 13 10.5H7.2L4 13v-2.5H3A2.2 2.2 0 0 1 .8 8.3V3.1A2.2 2.2 0 0 1 3 .9z"/><path class="glyph" d="M4.6 4.6h6.8M4.6 7h4.4"/></svg>`,
+  };
   const opened = []; // { s, el, state, pending, timer }
   const dockFind = s => opened.find(o => o.s === s);
   function dockAdd(s, state = "") {
     let o = dockFind(s); if (o) return o;
     const el = document.createElement("button"); el.type = "button"; el.className = "dock-item";
     el.style.setProperty("--cd", s.proj.cd); el.style.setProperty("--cl", s.proj.cl);
-    el.innerHTML = `${FOLDER}<span class="t"></span><span class="st" aria-hidden="true"></span><span class="x" aria-label="Quitar de la barra"><svg class="ico" viewBox="0 0 16 16"><path d="M5 5l6 6M11 5l-6 6"/></svg></span>`;
+    el.dataset.kind = s.plane.kind;
+    el.innerHTML = `${ICONS[s.plane.kind]}<span class="t"></span><span class="st" aria-hidden="true"></span><span class="x" aria-label="Quitar de la barra"><svg class="ico" viewBox="0 0 16 16"><path d="M5 5l6 6M11 5l-6 6"/></svg></span>`;
     el.querySelector(".t").textContent = s.title;
     o = { s, el, state: "", pending: null, timer: 0 };
     el.onclick = e => { if (e.target.closest(".x")) dockRemove(o); else dockOpen(o); };
