@@ -7,7 +7,7 @@ Lanzador de sesiones de Claude Code: cada sesión es una estrella, los proyectos
 ## Estructura
 - `index.html` — página
 - `css/styles.css` — estilos
-- `js/app.js` — dibujo del cúmulo, cámara, panel y terminal simulada
+- `js/app.js` — dibujo del cúmulo, cámara, panel, temas y vista de sesión a pantalla completa (simulada)
 - `data/sessions.js` — **los datos** (lo único que hay que cambiar para usar datos reales)
 
 ## Formato de los datos
@@ -20,3 +20,9 @@ window.CUMULO_DATA = { sessions: [
 - `related` añade hilos punteados entre proyectos distintos (opcional).
 
 Las sesiones reales están en `~/.claude/projects/<carpeta>/<id>.jsonl`; un script generará este archivo a partir de ellas. Los datos reales no se subirán al repositorio público.
+
+## Diseño
+- **Temas:** oscuro (cielo fotografiado) y claro (carta celeste impresa). Sigue al sistema hasta que eliges uno con el botón sol/luna; el cambio se hace con un revelado circular.
+- **Estrellas:** el tamaño crece con los mensajes; las sesiones largas tienen picos de difracción (oscuro) o cruz de carta (claro); las activas estos días laten.
+- **Tipografía:** Bricolage Grotesque (títulos y texto) y Martian Mono (datos).
+- **Movimiento:** cámara con vuelos suavizados, zoom anclado al cursor e inercia; todo respeta `prefers-reduced-motion`.
