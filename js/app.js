@@ -404,11 +404,24 @@
     // polvo con paralaje; durante el cambio de plano se abre hacia los bordes, como al avanzar
     drift.x += (cam.x - lastCam.x) * cam.z; drift.y += (cam.y - lastCam.y) * cam.z;
     lastCam.x = cam.x; lastCam.y = cam.y; lastCam.z = cam.z;
+    // al entrar o salir de una sesión, el polvo se estira en estelas desde la estrella
+    const dv = diveWarp();
+    const wcx = dv ? dv.x : W / 2, wcy = dv ? dv.y : H / 2;
+    const warp = Math.max(sw * 0.6, dv ? dv.k : 0);
     for (const b of dust) {
       let sx = ((b.x - drift.x * b.d) % W + W) % W;
       let sy = ((b.y - drift.y * b.d) % H + H) % H;
-      if (sw) { const w = 1 + sw * b.d * 0.6; sx = W / 2 + (sx - W / 2) * w; sy = H / 2 + (sy - H / 2) * w; }
       const a = b.a * th.dustA * (0.7 + 0.3 * Math.sin(t * b.sp + b.tw));
+      if (warp > 0.01) {
+        const w = 1 + warp * b.d * (dv ? 2.2 : 1);
+        const ex = wcx + (sx - wcx) * w, ey = wcy + (sy - wcy) * w;
+        if (dv) { // estela: del punto a su posición estirada
+          ctx.strokeStyle = rgba(th.dust, a * (1 - warp * 0.3)); ctx.lineWidth = b.r * 1.1;
+          ctx.beginPath(); ctx.moveTo(lerp(sx, ex, 0.35), lerp(sy, ey, 0.35)); ctx.lineTo(ex, ey); ctx.stroke();
+          continue;
+        }
+        sx = ex; sy = ey;
+      }
       ctx.fillStyle = rgba(th.dust, a);
       ctx.fillRect(sx, sy, b.r * 1.3, b.r * 1.3);
     }
@@ -419,6 +432,55 @@
     renderPlane(front, t, dt, k, light);
     ctx = mainCtx; V = cam;
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    drawDive(now, light);
+  }
+
+  // ── salto a una estrella (entrar / salir de una sesión) ───────
+  // Al entrar, el brillo de la estrella crece hasta llenar la pantalla y la sesión surge de esa luz.
+  // Al salir, la luz se condensa de vuelta en la estrella, que late una vez al recibirla.
+  let dive = null; // { s, t0, dur, dir: 1 entrar | -1 salir }
+  let labelHidden = null; // etiqueta que está viajando (no se dibuja en el lienzo)
+  function diveProgress(now = performance.now()) {
+    if (!dive) return null;
+    const p = (now - dive.t0) / dive.dur;
+    if (p >= 1) { dive = null; return null; }
+    return Math.max(0, p);
+  }
+  function diveWarp() {
+    const p = diveProgress(); if (p === null) return null;
+    const [x, y] = toScreen(dive.s.x, dive.s.y);
+    const k = dive.dir > 0 ? Math.sin(Math.PI * Math.min(1, p * 1.15)) * 0.9 : Math.sin(Math.PI * p) * 0.45;
+    return { x, y, k };
+  }
+  function drawDive(now, light) {
+    const p = diveProgress(now); if (p === null) return;
+    const s = dive.s, color = colorOf(s.proj);
+    const [x, y] = toScreen(s.x, s.y);
+    const far = Math.hypot(Math.max(x, W - x), Math.max(y, H - y)) * 1.15;
+    let r, a;
+    if (dive.dir > 0) {
+      r = lerp(10, far, Math.pow(easeInOutCubic(p), 1.35));
+      a = p < 0.55 ? easeOutCubic(p / 0.55) : 1;
+    } else {
+      r = lerp(far * 0.7, 6, easeOutCubic(p));
+      a = p < 0.15 ? p / 0.15 : 1 - easeInOutCubic((p - 0.15) / 0.85);
+    }
+    ctx.globalCompositeOperation = light ? "multiply" : "lighter";
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    if (light) {
+      g.addColorStop(0, rgba(color, 0.9 * a)); g.addColorStop(0.18, rgba(color, 0.55 * a)); g.addColorStop(0.5, rgba(color, 0.18 * a)); g.addColorStop(1, rgba(color, 0));
+    } else {
+      g.addColorStop(0, `rgba(255,252,246,${0.95 * a})`); g.addColorStop(0.12, rgba(color, 0.7 * a));
+      g.addColorStop(0.45, rgba(color, 0.18 * a)); g.addColorStop(1, rgba(color, 0));
+    }
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = "source-over";
+    // al volver, la estrella late al recibir la luz
+    if (dive.dir < 0 && p > 0.6) {
+      const q = (p - 0.6) / 0.4, R = s.size * Math.pow(cam.z, 0.55);
+      ctx.strokeStyle = rgba(light ? th.ink : color, (1 - q) * 0.7); ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(x, y, R * (2 + 12 * easeOutCubic(q)), 0, 6.283); ctx.stroke();
+    }
   }
 
   function renderPlane(plane, t, dt, k, light) {
@@ -595,7 +657,7 @@
 
     // etiquetas (aparecen deslizándose)
     for (const s of list) {
-      if (s.la < 0.01) continue;
+      if (s.la < 0.01 || s === labelHidden) continue;
       const [sx, sy] = toScreen(s.x, s.y);
       const off = s.size * zs * 4 + 16 + (1 - s.la) * -8;
       ctx.textAlign = "left";
@@ -920,7 +982,34 @@
   // compositor con adjuntos de imagen y un botón que se convierte en «parar» mientras Claude responde.
   const sessionEl = $("session"), sLog = $("sLog"), sScroll = $("sScroll"), sInput = $("sInput"), sForm = $("sForm");
   const sMain = sessionEl.querySelector(".s-main"), sFile = $("sFile"), sAttach = $("sAttach"), sSend = $("sSend");
-  let current = null, camBefore = null, clipAnim = null;
+  let current = null, camBefore = null, sAnim = null, enterTimer = 0;
+
+  // posición de la etiqueta de una estrella en el mapa para una vista dada (igual que la dibuja el lienzo)
+  function labelBox(s, view) {
+    const zs = Math.pow(view.z, 0.55);
+    const sx = (s.x - view.x) * view.z + W / 2, sy = (s.y - view.y) * view.z + H / 2;
+    // el lienzo escribe sobre la línea base; la copia en HTML necesita la parte de arriba de su caja
+    mainCtx.font = `500 14px ${FONT_DISPLAY}`;
+    if ("fontStretch" in mainCtx) mainCtx.fontStretch = "ultra-condensed";
+    const asc = mainCtx.measureText(s.title).fontBoundingBoxAscent || 13;
+    if ("fontStretch" in mainCtx) mainCtx.fontStretch = "normal";
+    return { left: sx + s.size * zs * 4 + 16, top: sy + 1 - asc, ls: "-0.6px" };
+  }
+  const cssVar = n => getComputedStyle(root).getPropertyValue(n).trim();
+  const tabBox = el => {
+    const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+    return { left: r.left, top: r.top, fs: parseFloat(cs.fontSize), st: cs.fontStretch, c: cssVar("--ink"), ls: cs.letterSpacing === "normal" ? "0px" : cs.letterSpacing };
+  };
+  // copia flotante del título que viaja entre el mapa y la pestaña
+  let flight = null;
+  function flyTitle(text, from, to, dur, delay) {
+    if (flight) flight.remove();
+    const el = document.createElement("div"); el.className = "title-flight"; el.textContent = text;
+    document.body.appendChild(el); flight = el;
+    const kf = o => ({ left: o.left + "px", top: o.top + "px", fontSize: o.fs + "px", fontStretch: o.st, color: o.c, letterSpacing: o.ls });
+    const an = el.animate([kf(from), kf(to)], { duration: dur, delay, easing: "cubic-bezier(.65,0,.35,1)", fill: "both" });
+    return an.finished.catch(() => {}).then(() => { if (flight === el) { el.remove(); flight = null; } });
+  }
   let run = 0;            // se incrementa para cancelar lo que se esté escribiendo
   let streaming = null;   // { stop() } mientras Claude responde
   let attachments = [];   // { file, url }
@@ -1094,24 +1183,43 @@
     sLog.innerHTML = ""; sInput.value = ""; autosize();
     attachments = []; sAttach.innerHTML = ""; sAttach.hidden = true; updateSend();
 
-    // la cámara se zambulle en la estrella mientras se abre la vista
+    const motion = !reduced();
+    if (sAnim) { sAnim.cancel(); sAnim = null; }
+    sessionEl.style.transformOrigin = "";
+
+    // la cámara se zambulle en la estrella, su luz llena la pantalla y la sesión surge de ella
     camBefore = { x: cam.x, y: cam.y, z: cam.z };
+    const from = s && motion ? labelBox(s, cam) : null;
     if (s) flyTo(s.x, s.y, Math.min(ZMAX, Math.max(cam.z, 1.5) * 2.4), { dur: 900, noPanel: true, noDip: true });
+    if (s && motion) dive = { s, t0: performance.now(), dur: 820, dir: 1 };
 
     sessionEl.classList.remove("closing");
     sessionEl.classList.add("open"); sessionEl.setAttribute("aria-hidden", "false");
     document.body.classList.add("session-open");
-    const [x, y] = origin || [W / 2, H / 2];
-    const r = Math.hypot(Math.max(x, W - x), Math.max(y, H - y));
-    if (clipAnim) clipAnim.cancel();
-    if (!reduced()) {
-      clipAnim = sessionEl.animate(
-        { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] },
-        { duration: 700, easing: "cubic-bezier(.65,0,.35,1)" }
+    if (motion) {
+      const to = from ? tabBox($("sTitle")) : null; // se mide antes de que empiecen las animaciones de entrada
+      const [ox, oy] = origin || [W / 2, H / 2];
+      if (!s) sessionEl.style.transformOrigin = `${ox}px ${oy}px`;
+      sessionEl.classList.add("entering");
+      clearTimeout(enterTimer); enterTimer = setTimeout(() => sessionEl.classList.remove("entering"), 1400);
+      sAnim = sessionEl.animate(
+        [{ opacity: 0, filter: "blur(10px)", transform: s ? "scale(1.035)" : "scale(.97)" }, { opacity: 1, filter: "blur(0px)", transform: "none" }],
+        { duration: s ? 560 : 420, delay: s ? 340 : 0, easing: "cubic-bezier(.16,1,.3,1)", fill: "backwards" }
       );
+      sAnim.onfinish = () => { sAnim = null; };
+      // el nombre de la estrella viaja hasta la pestaña
+      if (from) {
+        const t = $("sTitle");
+        t.style.opacity = "0"; labelHidden = s;
+        flyTitle(s.title,
+          { ...from, fs: 14, st: "75%", c: rgba(th.ink, 0.96) },
+          to,
+          720, 40
+        ).then(() => { t.style.opacity = ""; });
+      }
     }
     const id = ++run;
-    setTimeout(() => { if (id === run) { intro(s, proj, id); if (!matchMedia("(pointer: coarse)").matches) sInput.focus({ preventScroll: true }); } }, reduced() ? 0 : 420);
+    setTimeout(() => { if (id === run) { intro(s, proj, id); if (!matchMedia("(pointer: coarse)").matches) sInput.focus({ preventScroll: true }); } }, motion ? (s ? 620 : 300) : 0);
   }
 
   function closeSession() {
@@ -1121,18 +1229,32 @@
     const s = current && current.s;
     let [x, y] = s ? toScreen(s.x, s.y) : [W / 2, H / 2];
     if (!s) { const b = $("newSession").getBoundingClientRect(); x = b.left + b.width / 2; y = b.top + b.height / 2; }
-    const r = Math.hypot(Math.max(x, W - x), Math.max(y, H - y));
-    sessionEl.classList.remove("open"); sessionEl.setAttribute("aria-hidden", "true");
+    sessionEl.classList.remove("open", "entering"); sessionEl.setAttribute("aria-hidden", "true");
     document.body.classList.remove("session-open");
-    if (camBefore && s) flyTo(camBefore.x, camBefore.y, camBefore.z, { dur: 850, noPanel: true, noDip: true, ease: easeOutQuart });
-    if (clipAnim) clipAnim.cancel();
-    if (reduced()) return;
+    if (camBefore && s) flyTo(camBefore.x, camBefore.y, camBefore.z, { dur: 900, noPanel: true, noDip: true, ease: easeOutQuart });
+    if (sAnim) { sAnim.cancel(); sAnim = null; }
+    $("sTitle").style.opacity = "";
+    if (reduced()) { labelHidden = null; return; }
+    // la ventana se condensa en luz que vuelve a su estrella
     sessionEl.classList.add("closing");
-    clipAnim = sessionEl.animate(
-      { clipPath: [`circle(${r}px at ${x}px ${y}px)`, `circle(0px at ${x}px ${y}px)`] },
-      { duration: 560, easing: "cubic-bezier(.65,0,.35,1)", delay: 40 }
+    sessionEl.style.transformOrigin = `${x}px ${y}px`;
+    sAnim = sessionEl.animate(
+      [{ opacity: 1, filter: "blur(0px)", transform: "none" }, { opacity: 0, filter: "blur(8px)", transform: "scale(.94)" }],
+      { duration: 380, easing: "cubic-bezier(.55,0,.75,.1)", fill: "forwards" }
     );
-    clipAnim.onfinish = () => { sessionEl.classList.remove("closing"); clipAnim = null; };
+    sAnim.onfinish = () => { sessionEl.classList.remove("closing"); sessionEl.style.transformOrigin = ""; if (sAnim) sAnim.cancel(); sAnim = null; };
+    if (s) {
+      dive = { s, t0: performance.now() + 140, dur: 1000, dir: -1 };
+      const r = $("sTitle").getBoundingClientRect();
+      if (r.width && camBefore) {
+        labelHidden = s;
+        flyTitle(s.title,
+          tabBox($("sTitle")),
+          { ...labelBox(s, camBefore), fs: 14, st: "75%", c: rgba(th.ink, 0.96) },
+          780, 60
+        ).then(() => { labelHidden = null; });
+      } else labelHidden = null;
+    }
     const back = s ? $("pResume") : $("newSession");
     setTimeout(() => back.focus({ preventScroll: true }), 300);
   }

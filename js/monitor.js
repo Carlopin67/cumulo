@@ -448,6 +448,7 @@
 
   window.cumuloMonitor = {
     setSession(s) {
+      LIMITS.forEach(L => { L.shown = 0; L.shownT = 0; }); // las órbitas se vuelven a trazar al entrar
       const msgs = s ? s.messages : 0;
       const seed = s ? s.id.charCodeAt(0) + s.id.charCodeAt(1) : 7;
       ctx = {

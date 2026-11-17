@@ -249,10 +249,26 @@ kbd { font-family: var(--font); font-size: 10px; color: var(--muted); border: 1p
   position: fixed; inset: 0; z-index: 10;
   display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr);
   background: var(--bg); color: var(--ink);
-  visibility: hidden; clip-path: circle(0 at 50% 50%);
+  visibility: hidden; opacity: 0;
 }
-.session.open { visibility: visible; clip-path: none; }
-.session.closing { visibility: visible; }
+.session.open { visibility: visible; opacity: 1; }
+.session.closing { visibility: visible; opacity: 1; }
+
+/* título que viaja de la etiqueta del mapa a la pestaña (y vuelta) */
+.title-flight {
+  position: fixed; z-index: 30; pointer-events: none; white-space: nowrap;
+  font-family: var(--font); font-weight: 500; line-height: normal;
+}
+
+/* al entrar, la sesión se monta por partes: pestañas, panel derecho y terminal */
+.session.entering .s-tabs { animation: sIn .55s var(--ease-out) .36s backwards; --dy: -6px; }
+.session.entering .s-tabs .tab { animation: tabIn .6s var(--ease-out) .42s backwards; }
+.session.entering .s-term { animation: sIn .6s var(--ease-out) .52s backwards; }
+.session.entering .composer { animation: sIn .6s var(--ease-out) .6s backwards; --dy: 10px; }
+.session.entering .monitor > * { animation: sIn .55s var(--ease-out) backwards; animation-delay: calc(.48s + var(--k, 0) * 90ms); }
+.monitor > :nth-child(2) { --k: 1; } .monitor > :nth-child(3) { --k: 2; } .monitor > :nth-child(4) { --k: 3; }
+@keyframes sIn { from { opacity: 0; translate: 0 var(--dy, 6px); } }
+@keyframes tabIn { from { clip-path: inset(0 100% 0 0); } }
 
 .s-tabs {
   display: flex; align-items: stretch; height: var(--bar-h);
@@ -471,8 +487,6 @@ kbd { font-family: var(--font); font-size: 10px; color: var(--muted); border: 1p
 .ctx-note { font-size: 10px; color: var(--faint); text-align: right; margin-top: 8px; font-variant-numeric: tabular-nums; }
 
 /* entrada del contenido de la sesión */
-.s-term, .composer, .monitor { transition: opacity .45s var(--ease-out) .25s; }
-.session:not(.open) .s-term, .session:not(.open) .composer, .session:not(.open) .monitor { opacity: 0; transition: opacity .15s; }
 
 /* ── transición de tema (revelado circular) ─────────────────── */
 ::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
