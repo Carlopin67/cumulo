@@ -33,6 +33,7 @@
 
   const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
   const easeOutQuart = t => 1 - Math.pow(1 - t, 4);
+  const easeInOutSine = t => -(Math.cos(Math.PI * t) - 1) / 2; // muy suave al arrancar y al frenar
   const easeInOutCubic = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   const easeOutBack = t => { const c = 1.6; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
 
@@ -1211,8 +1212,8 @@
     document.body.classList.toggle("diving", !!s);
     const [sx0, sy0] = s ? toScreen(s.x, s.y) : [W / 2, H / 2];
     const needCenter = s && motion && Math.hypot(sx0 - W / 2, sy0 - H / 2) > 4;
-    const CENTER = 520;
-    if (needCenter) flyTo(s.x, s.y, cam.z, { dur: CENTER, noPanel: true, noDip: true, ease: easeInOutCubic });
+    const CENTER = 900;
+    if (needCenter) flyTo(s.x, s.y, cam.z, { dur: CENTER, noPanel: true, noDip: true, ease: easeInOutSine });
     const id = ++run;
     clearTimeout(openTimer);
     const reveal = () => {
@@ -1247,7 +1248,7 @@
       }
       setTimeout(() => { if (id === run) { intro(s, proj, id); if (!matchMedia("(pointer: coarse)").matches) sInput.focus({ preventScroll: true }); } }, motion ? (s ? 620 : 300) : 0);
     };
-    if (needCenter) openTimer = setTimeout(reveal, CENTER + 40); else reveal();
+    if (needCenter) openTimer = setTimeout(reveal, CENTER); else reveal();
   }
   // Esc mientras la estrella se está centrando: se cancela la entrada
   function cancelOpen() {
@@ -1288,8 +1289,9 @@
       const cb = camBefore;
       closeTimer = setTimeout(() => {
         closeTimer = 0;
-        document.body.classList.remove("diving");
-        flyTo(cb.x, cb.y, cb.z, { dur: 560, noPanel: true, noDip: true, ease: easeInOutCubic });
+        document.body.classList.add("returning"); document.body.classList.remove("diving");
+        setTimeout(() => document.body.classList.remove("returning"), 1000);
+        flyTo(cb.x, cb.y, cb.z, { dur: 950, noPanel: true, noDip: true, ease: easeInOutSine });
       }, BACK);
     } else {
       document.body.classList.remove("diving");
