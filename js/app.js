@@ -974,7 +974,7 @@
   // compositor con adjuntos de imagen y un botón que se convierte en «parar» mientras Claude responde.
   const sessionEl = $("session"), sLog = $("sLog"), sScroll = $("sScroll"), sInput = $("sInput"), sForm = $("sForm");
   const sMain = sessionEl.querySelector(".s-main"), sFile = $("sFile"), sAttach = $("sAttach"), sSend = $("sSend");
-  let current = null, camBefore = null, sAnim = null, enterTimer = 0;
+  let current = null, camBefore = null, sAnim = null, enterTimer = 0, openTimer = 0;
 
   // posición de la etiqueta de una estrella en el mapa para una vista dada (igual que la dibuja el lienzo)
   function labelBox(s, view) {
@@ -1135,11 +1135,23 @@
   });
   sScroll.addEventListener("click", () => { if (!String(window.getSelection())) sInput.focus({ preventScroll: true }); });
 
+  // lo que una sesión dejó pendiente mientras no estabas: una respuesta terminada o una pregunta
+  function showPending(p) {
+    if (!p) return;
+    const b = block({ prompt: "" }); b.el.classList.add("pending", "reply", p.kind);
+    if (p.kind === "done") outLine(b.out, p.text);
+    else {
+      outLine(b.out, p.q);
+      p.opts.forEach((o, i) => outLine(b.out, `  ${i + 1}. ${o}`, "opt"));
+      outLine(b.out, "Responde con el número o escribe lo que prefieras.", "d");
+    }
+  }
   async function intro(s, proj, id) {
     if (current && current.chat) { // un chat se lee como conversación, no como terminal
       if (s) {
         const prev = block({ prompt: s.firstPrompt || "", time: fmtDate(s.started) });
         outLine(prev.out, `… ${Math.max(0, s.messages - 1)} mensajes anteriores · última vez ${ago(s.lastActive)}`, "d");
+        showPending(current && current.pending);
       } else {
         const b = block({ prompt: "" }); b.el.classList.add("note");
         outLine(b.out, "Nuevo chat. Al terminar aparecerá como una estrella en el plano Ask.", "d");
@@ -1153,6 +1165,7 @@
       await wait(250); if (id !== run) return;
       const prev = block({ prompt: s.firstPrompt || "", time: fmtDate(s.started) });
       outLine(prev.out, `… ${Math.max(0, s.messages - 1)} mensajes anteriores`, "d");
+      showPending(current && current.pending);
     } else {
       outLine(b.out, "Nueva sesión. Al terminar aparecerá como una estrella nueva en el cúmulo.", "d");
     }
@@ -1160,10 +1173,14 @@
   }
 
   function openSession(s, origin) {
+    const switching = sessionEl.classList.contains("open"); // cambio de sesión desde la barra inferior
+    const dk = s ? dockAdd(s) : null;
+    const pending = dk && (dk.state === "ask" || dk.state === "done") ? dk.pending : null;
+    if (dk) dockState(dk, "");
     const chat = (s ? s.plane : P).kind === "ask";
     if (window.cumuloMonitor) window.cumuloMonitor.setSession(s); // los chats también gastan uso y contexto
     const proj = s ? s.proj : ((selected && selected.proj) || hoverProject || projList[0]);
-    current = { s, proj, chat };
+    current = { s, proj, chat, pending };
     sessionEl.classList.toggle("chat", chat);
     $("sProject").innerHTML = proj ? dotHTML(proj) : "";
     $("sTitle").textContent = s ? s.title : (chat ? "Nuevo chat" : "Nueva sesión");
@@ -1176,56 +1193,91 @@
     attachments = []; sAttach.innerHTML = ""; sAttach.hidden = true; updateSend();
 
     const motion = !reduced();
+    dockSync();
+    if (switching) { // ya estás dentro: la nueva sesión entra por partes, sin zambullirse otra vez
+      sessionEl.classList.remove("switching"); void sessionEl.offsetWidth;
+      if (motion) { sessionEl.classList.add("switching"); clearTimeout(enterTimer); enterTimer = setTimeout(() => sessionEl.classList.remove("switching"), 700); }
+      const id = ++run;
+      setTimeout(() => { if (id === run) { intro(s, proj, id); sInput.focus({ preventScroll: true }); } }, motion ? 120 : 0);
+      return;
+    }
     if (sAnim) { sAnim.cancel(); sAnim = null; }
     sessionEl.style.transformOrigin = "";
 
-    // la cámara se zambulle en la estrella, su luz llena la pantalla y la sesión surge de ella
+    // 1) la estrella se coloca en el centro de la pantalla (el inspector se aparta)
+    // 2) ya quieta, la cámara se zambulle, su luz llena la pantalla y la sesión surge de ella
     camBefore = { x: cam.x, y: cam.y, z: cam.z };
-    const from = s && motion ? labelBox(s, cam) : null;
-    if (s) flyTo(s.x, s.y, Math.min(ZMAX, Math.max(cam.z, 1.5) * 2.4), { dur: 760, noPanel: true, noDip: true, ease: easeOutCubic });
-    if (s && motion) dive = { s, t0: performance.now(), dur: 820, dir: 1 };
     document.body.classList.toggle("diving", !!s);
-
-    sessionEl.classList.remove("closing");
-    sessionEl.classList.add("open"); sessionEl.setAttribute("aria-hidden", "false");
-    document.body.classList.add("session-open");
-    if (motion) {
-      const to = from ? tabBox($("sTitle")) : null; // se mide antes de que empiecen las animaciones de entrada
-      const [ox, oy] = origin || [W / 2, H / 2];
-      if (!s) sessionEl.style.transformOrigin = `${ox}px ${oy}px`;
-      sessionEl.classList.add("entering");
-      clearTimeout(enterTimer); enterTimer = setTimeout(() => sessionEl.classList.remove("entering"), 1400);
-      sAnim = sessionEl.animate(
-        [{ opacity: 0, filter: "blur(10px)", transform: s ? "scale(1.035)" : "scale(.97)" }, { opacity: 1, filter: "blur(0px)", transform: "none" }],
-        { duration: s ? 560 : 420, delay: s ? 340 : 0, easing: "cubic-bezier(.16,1,.3,1)", fill: "backwards" }
-      );
-      sAnim.onfinish = () => { sAnim = null; };
-      // el nombre de la estrella viaja hasta la pestaña
-      if (from) {
-        const t = $("sTitle");
-        t.style.opacity = "0"; labelHidden = s;
-        flyTitle(s.title,
-          { ...from, fs: 14, st: "75%", c: rgba(th.ink, 0.96) },
-          to,
-          720, 40
-        ).then(() => { t.style.opacity = ""; });
-      }
-    }
+    const [sx0, sy0] = s ? toScreen(s.x, s.y) : [W / 2, H / 2];
+    const needCenter = s && motion && Math.hypot(sx0 - W / 2, sy0 - H / 2) > 4;
+    const CENTER = 520;
+    if (needCenter) flyTo(s.x, s.y, cam.z, { dur: CENTER, noPanel: true, noDip: true, ease: easeInOutCubic });
     const id = ++run;
-    setTimeout(() => { if (id === run) { intro(s, proj, id); if (!matchMedia("(pointer: coarse)").matches) sInput.focus({ preventScroll: true }); } }, motion ? (s ? 620 : 300) : 0);
+    clearTimeout(openTimer);
+    const reveal = () => {
+      if (id !== run) return;
+      openTimer = 0;
+      const from = s && motion ? labelBox(s, cam) : null;
+      if (s) flyTo(s.x, s.y, Math.min(ZMAX, Math.max(cam.z, 1.5) * 2.4), { dur: 760, noPanel: true, noDip: true, ease: easeInOutCubic });
+      if (s && motion) dive = { s, t0: performance.now(), dur: 820, dir: 1 };
+
+      sessionEl.classList.remove("closing");
+      sessionEl.classList.add("open"); sessionEl.setAttribute("aria-hidden", "false");
+      document.body.classList.add("session-open");
+      dockSync();
+      if (motion) {
+        const to = from ? tabBox($("sTitle")) : null; // se mide antes de que empiecen las animaciones de entrada
+        const [ox, oy] = origin || [W / 2, H / 2];
+        if (!s) sessionEl.style.transformOrigin = `${ox}px ${oy}px`;
+        sessionEl.classList.add("entering");
+        clearTimeout(enterTimer); enterTimer = setTimeout(() => sessionEl.classList.remove("entering"), 1400);
+        sAnim = sessionEl.animate(
+          [{ opacity: 0, filter: "blur(10px)", transform: s ? "scale(1.035)" : "scale(.97)" }, { opacity: 1, filter: "blur(0px)", transform: "none" }],
+          { duration: s ? 560 : 420, delay: s ? 340 : 0, easing: "cubic-bezier(.16,1,.3,1)", fill: "backwards" }
+        );
+        sAnim.onfinish = () => { sAnim = null; };
+        // el nombre de la estrella viaja hasta la pestaña
+        if (from) {
+          const t = $("sTitle");
+          t.style.opacity = "0"; labelHidden = s;
+          flyTitle(s.title, { ...from, fs: 14, st: "75%", c: rgba(th.ink, 0.96) }, to, 720, 40)
+            .then(() => { t.style.opacity = ""; });
+        }
+      }
+      setTimeout(() => { if (id === run) { intro(s, proj, id); if (!matchMedia("(pointer: coarse)").matches) sInput.focus({ preventScroll: true }); } }, motion ? (s ? 620 : 300) : 0);
+    };
+    if (needCenter) openTimer = setTimeout(reveal, CENTER + 40); else reveal();
+  }
+  // Esc mientras la estrella se está centrando: se cancela la entrada
+  function cancelOpen() {
+    if (!openTimer) return false;
+    clearTimeout(openTimer); openTimer = 0; run++;
+    document.body.classList.remove("diving");
+    current = null; dockSync();
+    return true;
   }
 
   function closeSession() {
     if (!sessionEl.classList.contains("open")) return;
-    if (streaming) streaming.stop();
-    run++;
     const s = current && current.s;
+    if (streaming) {
+      streaming.stop();
+      const o = s && dockFind(s);
+      if (o) { // la respuesta sigue en segundo plano; la carpeta avisará cuando termine
+        dockState(o, "working");
+        clearTimeout(o.timer);
+        o.timer = setTimeout(() => dockState(o, "done", { kind: "done", text: `He terminado de responder en «${s.title}». Te dejo el resultado aquí y, si quieres, seguimos con el siguiente paso.` }), 4000 + Math.random() * 3000);
+      }
+    }
+    run++;
     let [x, y] = s ? toScreen(s.x, s.y) : [W / 2, H / 2];
     if (!s) { const b = $("newSession").getBoundingClientRect(); x = b.left + b.width / 2; y = b.top + b.height / 2; }
-    sessionEl.classList.remove("open", "entering"); sessionEl.setAttribute("aria-hidden", "true");
+    sessionEl.classList.remove("open", "entering", "switching"); sessionEl.setAttribute("aria-hidden", "true");
     document.body.classList.remove("diving");
+    current = null; dockSync();
+    const here = s && s.plane === P; // si la sesión es del otro plano, no hay estrella a la que volver
     document.body.classList.remove("session-open");
-    if (camBefore && s) flyTo(camBefore.x, camBefore.y, camBefore.z, { dur: 900, noPanel: true, noDip: true, ease: easeOutQuart });
+    if (camBefore && here) flyTo(camBefore.x, camBefore.y, camBefore.z, { dur: 900, noPanel: true, noDip: true, ease: easeOutQuart });
     if (sAnim) { sAnim.cancel(); sAnim = null; }
     $("sTitle").style.opacity = "";
     if (reduced()) { labelHidden = null; return; }
@@ -1237,7 +1289,7 @@
       { duration: 380, easing: "cubic-bezier(.55,0,.75,.1)", fill: "forwards" }
     );
     sAnim.onfinish = () => { sessionEl.classList.remove("closing"); sessionEl.style.transformOrigin = ""; if (sAnim) sAnim.cancel(); sAnim = null; };
-    if (s) {
+    if (here) {
       dive = { s, t0: performance.now() + 140, dur: 1000, dir: -1 };
       const r = $("sTitle").getBoundingClientRect();
       if (r.width && camBefore) {
@@ -1254,6 +1306,65 @@
   }
 
   $("sBack").onclick = closeSession;
+
+  // ── barra de tareas: una carpeta por sesión abierta ──────────
+  // Parpadea en ámbar si la sesión te pregunta algo y en verde si ha terminado de responder.
+  const dock = $("dock");
+  const FOLDER = `<svg class="folder" viewBox="0 0 15 12" aria-hidden="true"><path class="back" d="M1 2.1c0-.6.5-1.1 1.1-1.1h3.3l1.4 1.5h6c.6 0 1.1.5 1.1 1.1v7.3c0 .6-.5 1.1-1.1 1.1H2.1c-.6 0-1.1-.5-1.1-1.1z"/><path class="front" d="M1 4.4h13v6.5c0 .6-.5 1.1-1.1 1.1H2.1c-.6 0-1.1-.5-1.1-1.1z"/></svg>`;
+  const opened = []; // { s, el, state, pending, timer }
+  const dockFind = s => opened.find(o => o.s === s);
+  function dockAdd(s, state = "") {
+    let o = dockFind(s); if (o) return o;
+    const el = document.createElement("button"); el.type = "button"; el.className = "dock-item";
+    el.style.setProperty("--cd", s.proj.cd); el.style.setProperty("--cl", s.proj.cl);
+    el.innerHTML = `${FOLDER}<span class="t"></span><span class="st" aria-hidden="true"></span><span class="x" aria-label="Quitar de la barra"><svg class="ico" viewBox="0 0 16 16"><path d="M5 5l6 6M11 5l-6 6"/></svg></span>`;
+    el.querySelector(".t").textContent = s.title;
+    o = { s, el, state: "", pending: null, timer: 0 };
+    el.onclick = e => { if (e.target.closest(".x")) dockRemove(o); else dockOpen(o); };
+    opened.push(o); dock.append(el); dockState(o, state);
+    return o;
+  }
+  function dockState(o, state, pending) {
+    o.state = state; if (pending) o.pending = pending;
+    o.el.dataset.state = state;
+    const why = { ask: " — te pregunta algo", done: " — ha terminado de responder", working: " — trabajando…" }[state] || "";
+    o.el.title = o.s.title + why;
+    o.el.setAttribute("aria-label", o.s.title + why);
+  }
+  function dockRemove(o) {
+    clearTimeout(o.timer);
+    opened.splice(opened.indexOf(o), 1);
+    if (current && current.s === o.s) closeSession();
+    o.el.classList.add("leaving"); setTimeout(() => o.el.remove(), 320);
+  }
+  function dockSync() {
+    opened.forEach(o => o.el.setAttribute("aria-current", String(!!(current && current.s === o.s && sessionEl.classList.contains("open")))));
+  }
+  function dockOpen(o) {
+    const s = o.s;
+    if (sessionEl.classList.contains("open")) { if (!(current && current.s === s)) openSession(s); return; }
+    const go = () => { select(s); openSession(s, toScreen(s.x, s.y)); };
+    if (s.plane !== P) { switchPlane(s.plane.kind); setTimeout(go, reduced() ? 0 : 700); } else go();
+  }
+  // simulación: tres sesiones abiertas; una termina de responder y otra te pregunta algo al rato
+  {
+    const recent = list => [...list].sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive));
+    const [c1, c2] = recent(PLANES.code.sessions), [a1] = recent(PLANES.ask.sessions);
+    const w = c1 && dockAdd(c1, "working"), q = c2 && dockAdd(c2); if (a1) dockAdd(a1);
+    if (w) w.timer = setTimeout(() => dockState(w, "done", { kind: "done", text: `He terminado con «${c1.title}»: los cambios están hechos y las pruebas pasan. ¿Quieres que lo suba?` }), 14000);
+    if (q) q.timer = setTimeout(() => dockState(q, "ask", { kind: "ask", q: "Antes de seguir, ¿cómo prefieres que lo haga?", opts: ["Aplicar el cambio ahora", "Hacerlo en una rama aparte", "Explícamelo antes de tocar nada"] }), 32000);
+  }
+
+  // órbitas de uso en miniatura (junto a la batería)
+  window.addEventListener("cumulo:limits", e => {
+    const u = e.detail || [], wk = u.find(x => x.k === "weekly"), se = u.find(x => x.k === "session");
+    if (!wk || !se) return;
+    const pc = x => Math.round(x.used * 100) + " %";
+    const arc = (el, x) => { el.style.strokeDasharray = `${Math.max(0.5, x.used * 100).toFixed(1)} 100`; el.setAttribute("class", "mo-arc " + x.level); };
+    arc($("moWeekly"), wk); arc($("moSession"), se);
+    $("moText").textContent = `${pc(se)} · ${pc(wk)}`;
+    $("moTip").textContent = `5 horas   ${pc(se).padStart(5)}   ${se.reset}\nSemanal   ${pc(wk).padStart(5)}   ${wk.reset}`;
+  });
 
   // compactar la conversación desde el botón de la ventana de contexto (equivale a /compact)
   const ctxBtn = $("ctxCompact");
@@ -1299,6 +1410,7 @@
     const inSession = sessionEl.classList.contains("open");
     if (e.key === "Escape") {
       if (inSession) { if (streaming) streaming.stop(); else closeSession(); }
+      else if (cancelOpen()) { /* entrada cancelada */ }
       else if (document.activeElement === search) clearSearch();
       else closePanel();
     } else if ((e.key === "1" || e.key === "2") && !inSession && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && !e.ctrlKey && !e.metaKey && !e.altKey) {

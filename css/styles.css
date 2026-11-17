@@ -71,6 +71,18 @@ button { background: none; border: 0; cursor: pointer; -webkit-tap-highlight-col
 kbd { font-family: var(--font); font-size: 10px; color: var(--muted); border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; line-height: 15px; }
 :focus-visible { outline: 1.5px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .num { font-variant-numeric: tabular-nums; }
+/* órbitas de uso en miniatura: exterior semanal, interior 5 h */
+.tray-usage { position: relative; gap: 7px; cursor: default; outline: none; }
+.mini-orbit { width: 16px; height: 16px; rotate: -90deg; overflow: visible; }
+.mo-track { fill: none; stroke: var(--line-2); stroke-width: 1.2; }
+.mo-arc { fill: none; stroke: var(--ink-2); stroke-width: 1.6; stroke-linecap: round; stroke-dasharray: 0 100; transition: stroke-dasharray .8s var(--ease-out), stroke .3s; filter: drop-shadow(0 0 2px color-mix(in srgb, var(--ink) 40%, transparent)); }
+.mo-arc.warn { stroke: var(--warn); } .mo-arc.crit { stroke: var(--crit); }
+.tray-tip {
+  position: absolute; right: 0; bottom: calc(100% + 10px); z-index: 20; width: max-content; padding: 8px 10px; white-space: pre; line-height: 1.6;
+  background: var(--chrome); border: 1px solid var(--line-2); border-radius: var(--r); color: var(--ink-2); box-shadow: var(--shadow);
+  opacity: 0; translate: 0 4px; pointer-events: none; transition: opacity var(--t-fast), translate var(--t-med) var(--ease-out);
+}
+.tray-usage:hover .tray-tip, .tray-usage:focus-visible .tray-tip { opacity: 1; translate: 0 0; }
 .ico { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 
 #sky { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
@@ -166,11 +178,45 @@ kbd { font-family: var(--font); font-size: 10px; color: var(--muted); border: 1p
 
 /* ── barra de estado ────────────────────────────────────────── */
 .statusbar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; height: calc(var(--status-h) + env(safe-area-inset-bottom, 0px));
-  display: flex; align-items: center; justify-content: flex-end;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 12; height: calc(var(--status-h) + env(safe-area-inset-bottom, 0px));
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
   padding: 0 max(12px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(14px, env(safe-area-inset-left, 0px));
   background: var(--chrome); border-top: 1px solid var(--line); color: var(--muted); font-size: 10.5px;
 }
+/* barra de tareas: una carpeta por sesión abierta */
+.dock { display: flex; align-items: center; gap: 2px; min-width: 0; height: 100%; overflow: hidden; margin-left: -6px; }
+.dock-item {
+  position: relative; display: inline-flex; align-items: center; gap: 7px; height: 22px; max-width: 190px; padding: 0 8px 0 7px;
+  border-radius: 4px; color: var(--muted); font-size: 10.5px; white-space: nowrap;
+  transition: color var(--t-fast), background-color var(--t-fast), opacity .3s, translate .4s var(--ease-out);
+  animation: dockIn .45s var(--ease-out) backwards;
+}
+@keyframes dockIn { from { opacity: 0; translate: 0 6px; } }
+.dock-item:hover { color: var(--ink); background: var(--hover); }
+.dock-item .t { overflow: hidden; text-overflow: ellipsis; }
+.dock-item .folder { --c: var(--cd); flex: none; width: 15px; height: 12px; }
+:root[data-theme="light"] .dock-item .folder { --c: var(--cl); }
+.folder .back { fill: color-mix(in srgb, var(--c) 30%, transparent); stroke: var(--c); stroke-width: 1; }
+.folder .front { fill: color-mix(in srgb, var(--c) 55%, var(--chrome)); stroke: var(--c); stroke-width: 1; transform-origin: 50% 100%; transition: transform .3s var(--ease-out); }
+.dock-item:hover .folder .front, .dock-item[aria-current="true"] .folder .front { transform: skewX(-8deg) scaleY(.86); } /* la carpeta se entreabre */
+.dock-item[aria-current="true"] { color: var(--ink); }
+.dock-item[aria-current="true"]::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -3px; height: 2px; border-radius: 1px; background: var(--accent); }
+.dock-item .x { display: none; width: 14px; height: 14px; margin-right: -4px; border-radius: 3px; place-items: center; color: var(--faint); }
+.dock-item:hover .x { display: inline-grid; }
+.dock-item .x:hover { color: var(--ink); background: var(--line-2); }
+.dock-item .st { flex: none; font-size: 10px; }
+.dock-item[data-state="working"] .st::before { content: "✻"; display: inline-block; color: var(--accent); animation: spin 1.2s steps(6) infinite; }
+/* te necesita: parpadea en ámbar (te pregunta algo) o en verde (ha terminado) */
+.dock-item[data-state="ask"] { --att: var(--warn); }
+.dock-item[data-state="done"] { --att: var(--ok); }
+.dock-item[data-state="ask"], .dock-item[data-state="done"] { color: var(--ink); animation: dockIn .45s var(--ease-out) backwards, attention 1.6s ease-in-out infinite; }
+.dock-item[data-state="ask"] .st::before, .dock-item[data-state="done"] .st::before { content: ""; display: block; width: 6px; height: 6px; border-radius: 50%; background: var(--att); box-shadow: 0 0 8px var(--att); }
+@keyframes attention {
+  0%, 100% { background: transparent; box-shadow: none; }
+  50% { background: color-mix(in srgb, var(--att) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--att) 45%, transparent), 0 0 14px -2px color-mix(in srgb, var(--att) 45%, transparent); }
+}
+.dock-item.leaving { opacity: 0; translate: 0 6px; pointer-events: none; }
+
 /* bandeja: wifi y volumen · batería · fecha y hora (la información de la bandeja del sistema, con el estilo de la app) */
 .tray { display: flex; align-items: center; height: 100%; }
 .tray-seg { display: inline-flex; align-items: center; gap: 9px; height: 14px; padding: 0 12px; border-left: 1px solid var(--line); }
@@ -186,6 +232,10 @@ kbd { font-family: var(--font); font-size: 10px; color: var(--muted); border: 1p
 .bat-fill.low { fill: var(--crit); opacity: 1; }
 .bat-bolt { width: 7px; height: 10px; fill: var(--accent); }
 .tray-clock { gap: 10px; color: var(--ink-2); }
+
+/* punto de color del proyecto */
+.dot { --c: var(--cd); width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--c); }
+:root[data-theme="light"] .dot { --c: var(--cl); }
 
 /* ── inspector de sesión (acoplado) ─────────────────────────── */
 .panel {
@@ -235,7 +285,7 @@ body.diving .panel.open { translate: 100% 0; transition: translate .32s var(--ea
 
 /* ── sesión a pantalla completa ─────────────────────────────── */
 .session {
-  position: fixed; inset: 0; z-index: 10;
+  position: fixed; inset: 0 0 var(--status-h) 0; z-index: 10;
   display: grid; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr);
   background: var(--bg); color: var(--ink);
   visibility: hidden; opacity: 0;
@@ -257,6 +307,15 @@ body.diving .panel.open { translate: 100% 0; transition: translate .32s var(--ea
 .session.entering .monitor > * { animation: sIn .55s var(--ease-out) backwards; animation-delay: calc(.48s + var(--k, 0) * 90ms); }
 .monitor > :nth-child(2) { --k: 1; } .monitor > :nth-child(3) { --k: 2; } .monitor > :nth-child(4) { --k: 3; }
 @keyframes sIn { from { opacity: 0; translate: 0 var(--dy, 6px); } }
+/* cambiar de sesión desde la barra de tareas: entrada corta, sin zambullirse */
+.session.switching .s-tabs .tab { animation: tabIn .45s var(--ease-out) backwards; }
+.session.switching .s-term { animation: sIn .4s var(--ease-out) .06s backwards; }
+.session.switching .monitor > * { animation: sIn .4s var(--ease-out) backwards; animation-delay: calc(.08s + var(--k, 0) * 50ms); }
+/* lo que la sesión dejó pendiente: verde si terminó, ámbar si te pregunta algo */
+.block.pending .b-head { display: none; }
+.block.pending::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--ok); }
+.block.pending.ask::before { background: var(--warn); }
+.b-out .opt { color: var(--ink); }
 @keyframes tabIn { from { clip-path: inset(0 100% 0 0); } }
 
 .s-tabs {

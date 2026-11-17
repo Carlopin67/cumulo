@@ -56,7 +56,18 @@
 
   <!-- barra inferior: solo la bandeja del sistema (como la de Windows) -->
   <footer class="statusbar chrome" style="--i:2">
+    <!-- sesiones abiertas, como carpetas; parpadean cuando una te necesita -->
+    <nav id="dock" class="dock" aria-label="Sesiones abiertas"></nav>
     <div class="tray" aria-label="Estado del equipo">
+      <span id="trayUsage" class="tray-seg tray-usage" tabindex="0" aria-label="Límites de uso">
+        <svg class="mini-orbit" viewBox="0 0 16 16" aria-hidden="true">
+          <circle class="mo-track" cx="8" cy="8" r="6.6"/><circle class="mo-track" cx="8" cy="8" r="3.6"/>
+          <circle id="moWeekly" class="mo-arc" cx="8" cy="8" r="6.6" pathLength="100"/>
+          <circle id="moSession" class="mo-arc" cx="8" cy="8" r="3.6" pathLength="100"/>
+        </svg>
+        <span id="moText" class="num"></span>
+        <span id="moTip" class="tray-tip" role="tooltip"></span>
+      </span>
       <span class="tray-seg">
         <svg id="trayWifi" class="tray-ico" viewBox="0 0 16 16" aria-label="Wi-Fi"><path d="M2 6.6a9 9 0 0 1 12 0M4.2 9a5.8 5.8 0 0 1 7.6 0M6.4 11.3a2.6 2.6 0 0 1 3.2 0"/></svg>
         <svg class="tray-ico" viewBox="0 0 16 16" aria-label="Volumen"><path d="M3 6.2h2L8 3.8v8.4L5 9.8H3z"/><path d="M10.6 6a2.8 2.8 0 0 1 0 4M12.3 4.4a5.2 5.2 0 0 1 0 7.2"/></svg>

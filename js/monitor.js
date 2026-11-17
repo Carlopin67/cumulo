@@ -291,6 +291,12 @@
       const lvl = levelOf(Math.max(pct, L.projected >= 1 ? 75 : 0));
       if (lvl !== L.level) { L.level = lvl; L.el.dataset.level = lvl; }
     }
+    // la barra inferior muestra las órbitas en miniatura
+    window.dispatchEvent(new CustomEvent("cumulo:limits", { detail: usage() }));
+  }
+  function usage() {
+    if (!limits) return [];
+    return LIMITS.map(L => ({ k: L.k, label: L.label, used: limits[L.k].used, elapsed: L.elapsed || 0, reset: L.reset.textContent, level: L.level || "" }));
   }
 
   let lastOrbit = 0;
@@ -447,6 +453,7 @@
   }
 
   window.cumuloMonitor = {
+    usage,
     setSession(s) {
       LIMITS.forEach(L => { L.shown = 0; L.shownT = 0; }); // las órbitas se vuelven a trazar al entrar
       const msgs = s ? s.messages : 0;
