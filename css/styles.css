@@ -301,11 +301,11 @@ kbd { font-family: var(--font); font-size: 10px; color: var(--muted); border: 1p
 .thinking .spin { display: inline-block; color: var(--accent); animation: spin 1.2s steps(6) infinite; }
 @keyframes spin { to { rotate: 360deg; } }
 
-/* chat del modo Ask: conversación centrada, sin monitor del sistema */
-.session.chat .s-body { grid-template-columns: minmax(0, 1fr); }
-.session.chat .monitor { display: none; }
-.session.chat .s-meta, .session.chat .s-log { max-width: 760px; margin-inline: auto; }
+/* chat del modo Ask: conversación a pantalla completa; a la derecha, uso y contexto (sin monitor del sistema) */
+.session.chat #monToggle, .session.chat #monRows, .session.chat .ctx-btn { display: none; }
+.session.chat .monitor .limits:first-of-type { margin-top: 0; border-top: 0; }
 .session.chat .s-term { padding-top: 22px; }
+.session.chat .s-meta { padding-inline: 22px; }
 .session.chat .s-log { line-height: 1.8; }
 .session.chat .block { border-top: 0; padding: 8px 22px 14px; }
 .session.chat .block:hover { background: none; }
@@ -313,16 +313,15 @@ kbd { font-family: var(--font); font-size: 10px; color: var(--muted); border: 1p
 .session.chat .b-head { justify-content: flex-end; align-items: center; }
 .session.chat .b-time { order: -1; }
 .session.chat .b-cmd {
-  flex: 0 1 auto; max-width: 78%; padding: 8px 13px; background: var(--field); border: 1px solid var(--line);
+  flex: 0 1 auto; max-width: min(64%, 90ch); padding: 8px 13px; background: var(--field); border: 1px solid var(--line);
   border-radius: 12px 12px 3px 12px;
 }
 .session.chat .b-cmd:empty, .session.chat .block.note .b-head { display: none; }
 .session.chat .b-cmd .p { display: none; }
 .session.chat .b-imgs { justify-content: flex-end; }
-.session.chat .b-out { margin-top: 12px; }
+.session.chat .b-out { margin-top: 12px; max-width: 96ch; }
 .session.chat .block.reply .b-out::before { content: "✻ Claude"; display: block; font-size: 10.5px; color: var(--accent); margin-bottom: 2px; }
 .session.chat .composer { background: var(--bg); border-top: 0; }
-.session.chat .c-row, .session.chat .c-hint { max-width: 760px; margin-inline: auto; }
 .session.chat .c-row { border-radius: 12px; padding: 6px; }
 
 /* compositor fijo abajo */

@@ -1080,7 +1080,7 @@
 
   function openSession(s, origin) {
     const chat = (s ? s.plane : P).kind === "ask";
-    if (!chat && window.cumuloMonitor) window.cumuloMonitor.setSession(s);
+    if (window.cumuloMonitor) window.cumuloMonitor.setSession(s); // los chats también gastan uso y contexto
     const proj = s ? s.proj : ((selected && selected.proj) || hoverProject || projList[0]);
     current = { s, proj, chat };
     sessionEl.classList.toggle("chat", chat);
