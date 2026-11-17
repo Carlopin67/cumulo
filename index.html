@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cúmulo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <canvas id="sky"></canvas>
+
+  <header class="brand">
+    <h1>Cúmulo</h1>
+    <p id="stats" class="mono"></p>
+  </header>
+
+  <div class="topbar">
+    <label class="search">
+      <input id="search" type="text" placeholder="Buscar sesión" autocomplete="off" spellcheck="false">
+      <kbd>/</kbd>
+    </label>
+    <button id="newSession" class="btn">Nueva sesión</button>
+  </div>
+
+  <nav id="legend" class="legend mono" aria-label="Proyectos"></nav>
+
+  <div class="zoom">
+    <button id="zoomIn" class="btn icon" aria-label="Acercar">+</button>
+    <button id="zoomOut" class="btn icon" aria-label="Alejar">−</button>
+    <button id="zoomFit" class="btn icon" aria-label="Ver todo">◯</button>
+  </div>
+
+  <p id="hint" class="hint mono">Arrastra para moverte · rueda para acercar · clic en una estrella para abrirla</p>
+
+  <aside id="panel" class="panel" aria-hidden="true">
+    <button id="panelClose" class="close" aria-label="Cerrar">×</button>
+    <p id="pProject" class="eyebrow mono"></p>
+    <h2 id="pTitle"></h2>
+    <blockquote id="pPrompt"></blockquote>
+    <dl class="meta mono">
+      <div><dt>Empezada</dt><dd id="pStarted"></dd></div>
+      <div><dt>Última vez</dt><dd id="pLast"></dd></div>
+      <div><dt>Mensajes</dt><dd id="pMsgs"></dd></div>
+      <div><dt>ID</dt><dd id="pId" class="id"></dd></div>
+    </dl>
+    <div class="actions">
+      <button id="pResume" class="btn primary">Reanudar sesión</button>
+      <button id="pCopy" class="btn">Copiar orden</button>
+    </div>
+    <h3 class="mono">Conectada con</h3>
+    <ul id="pLinks" class="links"></ul>
+  </aside>
+
+  <div id="term" class="term" aria-hidden="true">
+    <div class="term-win">
+      <div class="term-bar mono"><span id="termTitle">claude</span><button id="termClose" class="close" aria-label="Cerrar">×</button></div>
+      <pre id="termBody" class="mono"></pre>
+    </div>
+  </div>
+
+  <script src="data/sessions.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
