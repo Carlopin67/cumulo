@@ -817,7 +817,7 @@
   const tickClock = () => {
     const d = new Date();
     clockTime.textContent = new Intl.DateTimeFormat("es-ES", { hour: "2-digit", minute: "2-digit" }).format(d);
-    clockDate.textContent = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
+    clockDate.textContent = new Intl.DateTimeFormat("es-ES", { weekday: "short", day: "numeric", month: "short" }).format(d).replace(/[.,]/g, "");
   };
   tickClock(); setInterval(tickClock, 10000);
   const wifi = document.getElementById("trayWifi");
@@ -827,8 +827,8 @@
   const batFill = document.getElementById("batFill"), batBolt = document.getElementById("batBolt"), batPct = document.getElementById("batPct");
   const showBat = (level, charging) => {
     const pct = Math.round(level * 100);
-    batPct.textContent = pct + "%";
-    batFill.setAttribute("width", (15.4 * level).toFixed(2));
+    batPct.textContent = pct + " %";
+    batFill.setAttribute("width", Math.max(0.6, 13.6 * level).toFixed(2));
     batFill.classList.toggle("low", pct <= 15 && !charging);
     batBolt.style.display = charging ? "" : "none";
   };
