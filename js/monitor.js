@@ -52,113 +52,132 @@
   // ── filas ───────────────────────────────────────────────────
   const gb = v => v >= 1000 ? `${f1.format(v / 1000)} TB` : `${f1.format(v)} GB`;
   const mbs = v => v >= 1000 ? `${f1.format(v / 1000)} GB/s` : v >= 10 ? `${f0.format(v)} MB/s` : `${f1.format(v)} MB/s`;
+  // spark: lo que dibuja la gráfica; max: escala fija (null = se ajusta a lo visto)
   const ROWS = [
-    { k: "cpu", label: "CPU", pct: d => d.cpu.usage, value: d => [f0.format(d.cpu.usage), "%"],
+    { k: "cpu", label: "CPU", pct: d => d.cpu.usage, value: d => [f0.format(d.cpu.usage), " %"],
       spark: d => d.cpu.usage, max: () => 100,
       detail: d => `${d.cpu.cores} núcleos · ${f1.format(d.cpu.ghz)} GHz · ${f0.format(d.cpu.temp)} °C` },
     { k: "ram", label: "RAM", pct: d => d.ram.used / d.ram.total * 100, value: d => [f1.format(d.ram.used), ` / ${f0.format(d.ram.total)} GB`],
-      spark: d => d.ram.used, max: d => d.ram.total,
+      spark: d => d.ram.used / d.ram.total * 100, max: () => 100,
       detail: d => `${f1.format(d.ram.total - d.ram.used)} GB libres` },
     { k: "vram", label: "VRAM", pct: d => d.vram.used / d.vram.total * 100, value: d => [f1.format(d.vram.used), ` / ${f0.format(d.vram.total)} GB`],
       spark: d => d.vram.gpuUsage, max: () => 100,
       detail: d => `GPU ${f0.format(d.vram.gpuUsage)} % · ${f0.format(d.vram.temp)} °C` },
-    { k: "disk", label: "Almacenamiento", pct: d => d.disk.used / d.disk.total * 100, value: d => [f0.format(d.disk.used), ` / ${gb(d.disk.total)}`],
+    { k: "disk", label: "Disco", pct: d => d.disk.used / d.disk.total * 100, value: d => [f0.format(d.disk.used), ` / ${gb(d.disk.total)}`],
       spark: d => d.disk.read + d.disk.write, max: null,
-      detail: d => `Lectura ${mbs(d.disk.read)} · escritura ${mbs(d.disk.write)}` },
-    { k: "net", label: "Red", extra: true, pct: null, value: d => [`↓ ${mbs(d.net.down)}`, ""],
+      detail: d => `lee ${mbs(d.disk.read)} · escribe ${mbs(d.disk.write)}` },
+    { k: "net", label: "Red", pct: null, value: d => [mbs(d.net.down), " ↓"],
       spark: d => d.net.down, max: null,
-      detail: d => `↑ ${mbs(d.net.up)}` },
-    { k: "claude", label: "Claude Code", extra: true, pct: null, value: d => [f1.format(d.claude.memory), " GB"],
+      detail: d => `sube ${mbs(d.net.up)}` },
+    { k: "claude", label: "Claude", pct: null, value: d => [f1.format(d.claude.memory), " GB"],
       spark: d => d.claude.memory, max: null,
-      detail: d => `${d.claude.processes} ${d.claude.processes === 1 ? "proceso" : "procesos"} en marcha` },
+      detail: d => `${d.claude.processes} ${d.claude.processes === 1 ? "proceso" : "procesos"}` },
   ];
 
   const rowsEl = document.getElementById("monRows");
-  const HIST = 48;
-  ROWS.forEach(r => {
+  const HIST = 60;
+  ROWS.forEach((r, i) => {
     const d = document.createElement("div");
-    d.className = "mrow" + (r.extra ? " extra" : "");
+    d.className = "mrow";
+    d.style.setProperty("--r", i);
     d.innerHTML = `
-      <div class="mrow-in">
-        <div class="mtop"><span class="mlabel mono"></span><span class="mval"><b></b><small></small></span></div>
-        ${r.pct ? `<div class="mbar"><i></i></div>` : ""}
-        <div class="mmore"><div class="mmore-in"><canvas class="spark" aria-hidden="true"></canvas><p class="mdetail mono"></p></div></div>
-      </div>`;
+      <div class="mtop"><span class="mlabel mono"></span><span class="mval"><b></b><small></small></span></div>
+      <canvas class="spark" aria-hidden="true"></canvas>
+      <p class="mdetail mono"></p>`;
     d.querySelector(".mlabel").textContent = r.label;
     r.el = d; r.b = d.querySelector("b"); r.small = d.querySelector("small");
-    r.bar = d.querySelector(".mbar i"); r.barWrap = d.querySelector(".mbar");
     r.detailEl = d.querySelector(".mdetail"); r.canvas = d.querySelector("canvas");
-    r.hist = []; r.shown = null; r.level = "";
+    r.hist = []; r.level = ""; r.peak = 0;
     rowsEl.appendChild(d);
   });
 
-  // ── abrir / cerrar (se recuerda en este navegador) ─────────
+  // ── plegar / desplegar (se recuerda en este navegador) ──────
   const toggle = document.getElementById("monToggle");
-  let expanded = false;
-  try { expanded = localStorage.getItem("cumulo-monitor") === "1"; } catch (e) { /* sin almacenamiento */ }
-  function setExpanded(v) {
-    expanded = v;
-    el.classList.toggle("expanded", v);
+  let open = true;
+  try { open = localStorage.getItem("cumulo-monitor") !== "0"; } catch (e) { /* sin almacenamiento */ }
+  function setOpen(v) {
+    open = v;
+    el.classList.toggle("folded", !v);
     toggle.setAttribute("aria-expanded", String(v));
     try { localStorage.setItem("cumulo-monitor", v ? "1" : "0"); } catch (e) { /* sin almacenamiento */ }
-    if (v) drawSparks();
   }
-  toggle.addEventListener("click", () => setExpanded(!expanded));
-  setExpanded(expanded);
+  toggle.addEventListener("click", () => setOpen(!open));
+  setOpen(open);
   document.getElementById("monSub").textContent = simulated ? "simulado" : "en vivo";
 
-  // ── colores del tema para las gráficas ──────────────────────
-  let colors = {};
+  // ── colores del tema ────────────────────────────────────────
+  let colors = {}, light = false;
   const readColors = () => {
     const cs = getComputedStyle(document.documentElement);
-    colors = { ink: cs.getPropertyValue("--ink").trim(), line: cs.getPropertyValue("--line").trim(),
-      warn: cs.getPropertyValue("--warn").trim(), crit: cs.getPropertyValue("--crit").trim() };
+    colors = { ink: cs.getPropertyValue("--ink").trim(), warn: cs.getPropertyValue("--warn").trim(), crit: cs.getPropertyValue("--crit").trim() };
+    light = document.documentElement.dataset.theme === "light";
   };
   readColors();
-  new MutationObserver(() => { readColors(); drawSparks(); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  new MutationObserver(readColors).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
   const levelOf = p => p == null ? "" : p >= 90 ? "crit" : p >= 75 ? "warn" : "";
   const colorFor = lvl => lvl === "crit" ? colors.crit : lvl === "warn" ? colors.warn : colors.ink;
+  const withAlpha = (c, a) => {
+    if (c.startsWith("#")) { const n = parseInt(c.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; }
+    return c;
+  };
 
-  function drawSpark(r) {
+  // ── gráficas: área difuminada con línea luminosa ───────────
+  // La historia se desliza suavemente (offset) para que no avance a saltos.
+  function drawSpark(r, slide) {
     const c = r.canvas, w = c.clientWidth, h = c.clientHeight;
     if (!w || !h) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+    if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
     const g = c.getContext("2d");
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, h);
-    const hs = r.hist; if (hs.length < 2) return;
-    const max = (r.max && r.max(r.last)) || Math.max(...hs) * 1.25 || 1;
-    const x = i => (i + HIST - hs.length) / (HIST - 1) * (w - 4) + 1;
-    const y = v => h - 2 - clamp(v / max, 0, 1) * (h - 5);
+    const hs = r.hist; if (hs.length < 3) return;
+    const fixed = r.max && r.last ? r.max(r.last) : null;
+    const max = fixed || Math.max(r.peak * 1.15, 1e-6);
+    const pad = 6, step = (w - pad) / (HIST - 2);
+    const x = i => w - pad - (hs.length - 1 - i + slide) * step; // slide 0→1 entre lecturas
+    const y = v => h - 1 - clamp(v / max, 0, 1) * (h - pad - 2);
     const col = colorFor(r.level);
-    // líneas guía muy tenues
-    g.strokeStyle = colors.line; g.lineWidth = 1;
-    g.beginPath(); for (const q of [0.5, 1]) { const yy = Math.round(h - 2 - q * (h - 5)) + 0.5; g.moveTo(0, yy); g.lineTo(w, yy); } g.stroke();
-    // área
-    const grad = g.createLinearGradient(0, 0, 0, h);
-    g.globalAlpha = 1;
-    grad.addColorStop(0, col); grad.addColorStop(1, "transparent");
-    g.beginPath(); g.moveTo(x(0), h);
-    hs.forEach((v, i) => g.lineTo(x(i), y(v)));
-    g.lineTo(x(hs.length - 1), h); g.closePath();
-    g.globalAlpha = 0.14; g.fillStyle = grad; g.fill(); g.globalAlpha = 1;
-    // línea y punto final
-    g.beginPath(); hs.forEach((v, i) => i ? g.lineTo(x(i), y(v)) : g.moveTo(x(i), y(v)));
-    g.strokeStyle = col; g.lineWidth = 1.2; g.lineJoin = "round"; g.stroke();
-    const lx = x(hs.length - 1), ly = y(hs[hs.length - 1]);
-    g.fillStyle = col; g.beginPath(); g.arc(lx, ly, 2.2, 0, 6.283); g.fill();
-  }
-  function drawSparks() { if (expanded) ROWS.forEach(drawSpark); }
 
-  // ── lectura y animación de los números ─────────────────────
-  let target = null, shown = null;
+    // curva suave (puntos medios)
+    const path = () => {
+      g.beginPath(); g.moveTo(x(0), y(hs[0]));
+      for (let i = 1; i < hs.length - 1; i++) {
+        const xm = (x(i) + x(i + 1)) / 2, ym = (y(hs[i]) + y(hs[i + 1])) / 2;
+        g.quadraticCurveTo(x(i), y(hs[i]), xm, ym);
+      }
+      g.lineTo(x(hs.length - 1), y(hs[hs.length - 1]));
+    };
+
+    // área: degradado vertical hacia transparente
+    const grad = g.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, withAlpha(col, light ? 0.16 : 0.22));
+    grad.addColorStop(1, withAlpha(col, 0));
+    path(); g.lineTo(x(hs.length - 1), h); g.lineTo(x(0), h); g.closePath();
+    g.fillStyle = grad; g.fill();
+
+    // halo de la línea y línea nítida
+    g.lineJoin = "round"; g.lineCap = "round";
+    path(); g.strokeStyle = withAlpha(col, light ? 0.12 : 0.22); g.lineWidth = 5; g.stroke();
+    path(); g.strokeStyle = col; g.lineWidth = 1.2; g.stroke();
+
+    // punto actual con brillo que respira
+    const lx = x(hs.length - 1), ly = y(hs[hs.length - 1]);
+    const t = performance.now() / 1000;
+    const glow = g.createRadialGradient(lx, ly, 0, lx, ly, 9);
+    glow.addColorStop(0, withAlpha(col, (light ? 0.14 : 0.4) + 0.1 * Math.sin(t * 2.4)));
+    glow.addColorStop(1, withAlpha(col, 0));
+    g.fillStyle = glow; g.fillRect(lx - 10, ly - 10, 20, 20);
+    g.fillStyle = col; g.beginPath(); g.arc(lx, ly, 2, 0, 6.283); g.fill();
+  }
+
+  // ── lectura y animación de números ──────────────────────────
+  let target = null, shown = null, lastTick = performance.now();
   const lerpSnap = (a, b, k) => {
     if (typeof b === "number") return a + (b - a) * k;
     const o = {}; for (const key in b) o[key] = lerpSnap(a[key], b[key], k); return o;
   };
-
   function render(d) {
     for (const r of ROWS) {
       const [big, small] = r.value(d);
@@ -166,41 +185,43 @@
       if (r.small.textContent !== small) r.small.textContent = small;
       const det = r.detail(d);
       if (r.detailEl.textContent !== det) r.detailEl.textContent = det;
-      if (r.bar) r.bar.style.transform = `scaleX(${clamp(r.pct(d), 0, 100) / 100})`;
     }
   }
-
-  function tick() {
-    let d;
-    try { d = source.read(); } catch (e) { return; }
-    target = d;
-    if (!shown) shown = JSON.parse(JSON.stringify(d));
+  function push(d) {
     for (const r of ROWS) {
       r.last = d;
-      r.hist.push(r.spark(d)); if (r.hist.length > HIST) r.hist.shift();
+      const v = r.spark(d);
+      r.hist.push(v); if (r.hist.length > HIST) r.hist.shift();
+      r.peak = Math.max(...r.hist);
       const lvl = r.pct ? levelOf(r.pct(d)) : "";
       if (lvl !== r.level) { r.level = lvl; r.el.dataset.level = lvl; }
     }
+  }
+  function tick() {
+    let d;
+    try { d = source.read(); } catch (e) { return; }
+    target = d; lastTick = performance.now();
+    if (!shown) shown = JSON.parse(JSON.stringify(d));
+    push(d);
     if (RM.matches) { shown = d; render(d); }
-    drawSparks();
   }
 
+  const sessionEl = document.getElementById("session");
   let last = 0;
   function loop(now) {
-    if (target && shown && !RM.matches) {
+    const visible = open && sessionEl && (sessionEl.classList.contains("open") || sessionEl.classList.contains("closing"));
+    if (visible && target) {
       const dt = Math.min(0.1, (now - last) / 1000 || 0.016);
-      shown = lerpSnap(shown, target, 1 - Math.exp(-dt * 6));
-      render(shown);
+      if (!RM.matches) { shown = lerpSnap(shown, target, 1 - Math.exp(-dt * 6)); render(shown); }
+      const slide = RM.matches ? 0 : clamp((now - lastTick) / 1000, 0, 1);
+      ROWS.forEach(r => drawSpark(r, slide));
     }
     last = now;
     requestAnimationFrame(loop);
   }
 
   // historia inicial para que las gráficas no empiecen vacías
-  for (let i = 0; i < HIST - 1; i++) {
-    const d = source.read();
-    ROWS.forEach(r => { r.hist.push(r.spark(d)); r.last = d; });
-  }
+  for (let i = 0; i < HIST - 1; i++) { try { push(source.read()); } catch (e) { break; } }
   tick();
   setInterval(() => { if (!document.hidden) tick(); }, 1000);
   requestAnimationFrame(loop);
