@@ -56,16 +56,16 @@
     const projList = [...projects.values()].sort((a, b) => b.sessions.length - a.sessions.length);
     const plane = { kind, sessions, projList, links: [], cam: null, depth: kind === "code" ? 0 : 1 };
     // radio de cada cúmulo según cuántas estrellas tiene (para colocarlos sin que se pisen)
-    projList.forEach(p => { p.radius = 30 * Math.sqrt(p.sessions.length + 0.4) + 36; });
+    projList.forEach(p => { p.radius = 46 * Math.sqrt(p.sessions.length + 0.4) + 24; });
     const placed = [];
     projList.forEach((p, i) => {
       // espiral áurea: se aleja hasta encontrar un hueco donde no toque a los ya colocados
       const a = i * GA + rot;
-      let r = i === 0 ? 0 : 120 + 40 * Math.sqrt(i);
+      let r = i === 0 ? 0 : 60 + 30 * Math.sqrt(i);
       for (let tries = 0; tries < 400; tries++) {
         const x = Math.cos(a) * r, y = Math.sin(a) * r * 0.78;
-        if (placed.every(o => Math.hypot(o.x - x, o.y - y) > o.radius + p.radius + 70)) { p.x = x; p.y = y; break; }
-        r += 12;
+        if (placed.every(o => Math.hypot(o.x - x, o.y - y) > o.radius + p.radius + 6)) { p.x = x; p.y = y; break; }
+        r += 6;
       }
       placed.push(p);
       p.cd = pal[0][i % pal[0].length]; p.cl = pal[1][i % pal[1].length];
@@ -74,7 +74,7 @@
       const R = rng(hash(kind + p.path));
       let maxR = 0;
       p.sessions.forEach((s, k) => {
-        const rr = 30 * Math.sqrt(k + 0.4) + R() * 16;
+        const rr = 46 * Math.sqrt(k + 0.4) + R() * 20;
         const aa = k * GA + R() * 0.9;
         s.x = p.x + Math.cos(aa) * rr; s.y = p.y + Math.sin(aa) * rr;
         s.proj = p; s.plane = plane;
@@ -293,6 +293,7 @@
     const list = plane.sessions;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     list.forEach(s => { x0 = Math.min(x0, s.x); y0 = Math.min(y0, s.y); x1 = Math.max(x1, s.x); y1 = Math.max(y1, s.y); });
+    plane.projList.forEach(p => { y0 = Math.min(y0, p.y - p.radius - 14); }); // deja sitio a los nombres de arriba
     if (!list.length) { x0 = y0 = -100; x1 = y1 = 100; }
     const pw = panelW();
     const z = clamp(Math.min((W - pw - 180) / (x1 - x0 + 120), (H - 180) / (y1 - y0 + 120)), 0.2, 2.2);
