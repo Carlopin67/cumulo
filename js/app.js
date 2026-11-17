@@ -155,6 +155,7 @@
 
   function applyTheme(t) {
     theme = t; th = THEMES[t]; root.dataset.theme = t;
+    window.dispatchEvent(new Event("cumulo:theme"));
     themeBtn.setAttribute("aria-label", t === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro");
   }
   applyTheme(theme);
@@ -1117,26 +1118,192 @@
     for (const ch of text) { if (id !== run) return; node.textContent += ch; scrollDown(); await new Promise(r => setTimeout(r, 6 + Math.random() * 12)); }
   }
 
-  // respuesta simulada que llega palabra a palabra y se puede parar
+  // ── respuesta simulada ──────────────────────────────────────
+  // Primero los pasos que da Claude (con capturas, como en la app de escritorio), luego el texto
+  // palabra a palabra y, a veces, una encuesta para que elijas cómo seguir. Todo se puede parar.
   const REPLIES = [
-    "Entendido. Primero reviso los archivos del proyecto para ver dónde encaja el cambio y luego te propongo los pasos antes de tocar nada.",
-    "He mirado la estructura actual. Hay dos sitios donde conviene hacerlo: en la lógica de datos y en la vista. Empiezo por los datos, que es lo que menos riesgo tiene.",
-    "Hecho el primer paso. Antes de seguir, ¿prefieres que lo deje en una rama aparte para que puedas probarlo tranquilo?",
+    { text: "Entendido. He revisado los archivos del proyecto y ya sé dónde encaja el cambio. Te cuento los pasos antes de tocar nada más." },
+    { text: "Hay dos sitios donde conviene hacerlo: en la lógica de datos y en la vista. He empezado por los datos, que es lo que menos riesgo tiene, y las pruebas pasan." },
+    { text: "Hecho el primer paso.", poll: { q: "¿Cómo sigo?", opts: ["Aplicar el resto ahora", "Hacerlo en una rama aparte", "Explícamelo antes de seguir"] } },
   ];
   const CHAT_REPLIES = [
-    "Buena pregunta. Te lo explico por partes y con un ejemplo, y si algo no queda claro lo vemos con más calma.",
-    "Aquí tienes una primera versión. La he dejado corta a propósito; dime qué tono prefieres y la ajusto.",
-    "Depende un poco de lo que busques. Te dejo tres opciones con sus pros y contras para que elijas.",
+    { text: "Buena pregunta. He buscado un par de fuentes para no inventarme nada; te lo explico por partes y con un ejemplo." },
+    { text: "Aquí tienes una primera versión. La he dejado corta a propósito; dime qué tono prefieres y la ajusto." },
+    { text: "Depende un poco de lo que busques.", poll: { q: "¿Qué te importa más?", opts: ["Que sea rápido", "Que sea barato", "Que sea lo más completo posible"] } },
   ];
+  const CODE_STEPS = [
+    { label: "Leer", det: "src/app.js", shot: "editor" },
+    { label: "Buscar", det: "«resume» en 12 archivos" },
+    { label: "Editar", det: "src/app.js  +18 −4", shot: "diff" },
+    { label: "Ejecutar", det: "npm test", shot: "terminal" },
+    { label: "Captura", det: "localhost:5173", shot: "browser" },
+  ];
+  const ASK_STEPS = [
+    { label: "Buscar en la web", det: "3 resultados", shot: "search" },
+    { label: "Leer página", det: "es.wikipedia.org", shot: "page" },
+    { label: "Ordenar la respuesta", det: "" },
+  ];
+  const STEP_ICONS = {
+    Leer: "M3.5 2.5h6l3 3v8h-9zM9.5 2.5v3h3", Buscar: "M7 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8zM10 10l3.5 3.5",
+    Editar: "M3 13l1-3.5L11 2.5l2.5 2.5L6.5 12zM9.5 4l2.5 2.5", Ejecutar: "M2.5 3.5h11v9h-11zM5 7l2 1.5L5 10M8.5 10.5h2.5",
+    Captura: "M2.5 5h2l1-1.5h5L11.5 5h2v7.5h-11zM8 6.8a2 2 0 1 1 0 4 2 2 0 0 1 0-4z", "Buscar en la web": "M8 2.5a5.5 5.5 0 1 1 0 11 5.5 5.5 0 0 1 0-11zM2.5 8h11M8 2.5c-2 2-2 9 0 11M8 2.5c2 2 2 9 0 11",
+    "Leer página": "M3.5 2.5h9v11h-9zM5.5 5.5h5M5.5 8h5M5.5 10.5h3", "Ordenar la respuesta": "M3 4.5h10M3 8h7M3 11.5h4",
+  };
+  const ico = d => `<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="${d}"/></svg>`;
+
+  // capturas simuladas (en la versión instalable serán las de verdad). Se dibujan con la paleta del
+  // lanzador: marco fino, barra con la ruta en monoespaciada y solo los colores del tema activo.
+  function shotSVG(kind, seed) {
+    const C = n => cssVar(n);
+    const bg = C("--bg"), chrome = C("--chrome"), field = C("--field"), line = C("--line"), line2 = C("--line-2");
+    const ink = C("--ink"), ink2 = C("--ink-2"), muted = C("--muted"), faint = C("--faint"), acc = C("--accent"), ok = C("--ok"), crit = C("--crit");
+    const R = rng(seed); const W0 = 320, H0 = 200, TOP = 20;
+    const font = `font-family="Martian Mono, ui-monospace, monospace"`;
+    const bars = (x, y, n, gap, cols, maxW, h = 3) => Array.from({ length: n }, () => 0).map((_, i) =>
+      `<rect x="${x + (R() < .3 ? 12 : 0)}" y="${y + i * gap}" width="${(18 + R() * maxW).toFixed(1)}" height="${h}" rx="${h / 2}" fill="${cols[Math.floor(R() * cols.length)]}"/>`).join("");
+    const title = { editor: "src/app.js", diff: "src/app.js  +18 −4", terminal: "~/proyecto  npm test", browser: "localhost:5173", page: "es.wikipedia.org", search: "buscar en la web" }[kind] || "";
+    let inner = "";
+    if (kind === "editor" || kind === "diff") {
+      inner = Array.from({ length: 14 }, (_, i) => `<text x="10" y="${TOP + 14 + i * 12}" ${font} font-size="5.5" fill="${faint}">${i + 41}</text>`).join("");
+      if (kind === "diff") inner += `<rect x="1" y="${TOP + 6 + 4 * 12}" width="${W0 - 2}" height="24" fill="${ok}" fill-opacity=".12"/><rect x="1" y="${TOP + 6 + 4 * 12}" width="2" height="24" fill="${ok}"/>`
+        + `<rect x="1" y="${TOP + 6 + 9 * 12}" width="${W0 - 2}" height="12" fill="${crit}" fill-opacity=".12"/><rect x="1" y="${TOP + 6 + 9 * 12}" width="2" height="12" fill="${crit}"/>`;
+      inner += bars(30, TOP + 10, 14, 12, [ink2, muted, muted, acc, faint], 180);
+    } else if (kind === "terminal") {
+      inner = `<text x="12" y="${TOP + 18}" ${font} font-size="7" fill="${acc}">$</text>` + bars(24, TOP + 14, 1, 12, [ink], 90)
+        + bars(12, TOP + 34, 7, 12, [muted, faint], 200) + `<text x="12" y="${H0 - 16}" ${font} font-size="7" fill="${ok}">✓ 24 pruebas pasan</text>`;
+    } else if (kind === "browser") { // la propia app en marcha: un cielo con estrellas, en los colores del tema
+      inner = Array.from({ length: 46 }, () => `<circle cx="${(R() * W0).toFixed(1)}" cy="${(TOP + 6 + R() * (H0 - TOP - 12)).toFixed(1)}" r="${R() < .9 ? .7 : 1.4}" fill="${ink}" opacity="${(.2 + R() * .6).toFixed(2)}"/>`).join("")
+        + `<defs><radialGradient id="g${seed}"><stop offset="0" stop-color="${ink}"/><stop offset=".3" stop-color="${acc}"/><stop offset="1" stop-color="${acc}" stop-opacity="0"/></radialGradient></defs><circle cx="160" cy="112" r="20" fill="url(#g${seed})"/>`;
+    } else if (kind === "page") {
+      inner = `<rect x="22" y="${TOP + 14}" width="140" height="7" rx="2" fill="${ink}"/>` + bars(22, TOP + 32, 10, 10, [muted, faint], 200)
+        + `<rect x="236" y="${TOP + 14}" width="62" height="56" rx="3" fill="${field}" stroke="${line}"/>`;
+    } else if (kind === "search") {
+      inner = `<rect x="22" y="${TOP + 10}" width="190" height="14" rx="3" fill="${field}" stroke="${line2}"/>` + bars(30, TOP + 15.5, 1, 0, [muted], 80)
+        + [0, 1, 2].map(i => `<rect x="22" y="${TOP + 40 + i * 44}" width="70" height="3" rx="1.5" fill="${faint}"/><rect x="22" y="${TOP + 47 + i * 44}" width="${(130 + R() * 80).toFixed(1)}" height="5" rx="2.5" fill="${acc}"/>` + bars(22, TOP + 58 + i * 44, 2, 8, [muted, faint], 220)).join("");
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W0} ${H0}">
+      <rect x=".5" y=".5" width="${W0 - 1}" height="${H0 - 1}" rx="6" fill="${bg}" stroke="${line2}"/>
+      <path d="M.5 ${TOP}V6.5a6 6 0 0 1 6-6h${W0 - 13}a6 6 0 0 1 6 6V${TOP}z" fill="${chrome}"/><path d="M0 ${TOP}h${W0}" stroke="${line}"/>
+      <text x="10" y="13.5" ${font} font-size="6.5" fill="${muted}">${title}</text>
+      ${inner}</svg>`;
+  }
+  const shotURL = (kind, seed) => "data:image/svg+xml;charset=utf-8," + encodeURIComponent(shotSVG(kind, seed));
+  // al cambiar de tema, las capturas se vuelven a pintar con la nueva paleta
+  window.addEventListener("cumulo:theme", () => {
+    document.querySelectorAll("img[data-shot]").forEach(im => { im.src = shotURL(im.dataset.shot, +im.dataset.seed); });
+    if (!viewer.hidden) showShot(vIdx);
+  });
+
+  // visor de capturas a pantalla completa: ← → para recorrer los pasos, Esc para cerrar
+  const viewer = document.createElement("div"); viewer.className = "shot-viewer"; viewer.hidden = true;
+  viewer.innerHTML = `<figure><img alt=""><figcaption></figcaption></figure>
+    <button class="sv-btn prev" aria-label="Paso anterior">${ico("M10 3.5 5.5 8l4.5 4.5")}</button>
+    <button class="sv-btn next" aria-label="Paso siguiente">${ico("M6 3.5 10.5 8 6 12.5")}</button>
+    <button class="sv-btn close" aria-label="Cerrar">${ico("M4 4l8 8M12 4l-8 8")}</button>`;
+  sessionEl.append(viewer);
+  let vList = [], vIdx = 0;
+  function showShot(i) {
+    vIdx = (i + vList.length) % vList.length;
+    const st = vList[vIdx];
+    viewer.querySelector("img").src = st.url;
+    viewer.querySelector("figcaption").textContent = `Paso ${st.n} de ${st.total} · ${st.label}${st.det ? " — " + st.det : ""}`;
+  }
+  function openViewer(list, i) {
+    vList = list; viewer.hidden = false; showShot(i);
+    if (!reduced()) viewer.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: "ease-out" });
+  }
+  const viewerOpen = () => !viewer.hidden;
+  function closeViewer() { viewer.hidden = true; }
+  viewer.querySelector(".prev").onclick = () => showShot(vIdx - 1);
+  viewer.querySelector(".next").onclick = () => showShot(vIdx + 1);
+  viewer.querySelector(".close").onclick = closeViewer;
+  viewer.addEventListener("click", e => { if (e.target === viewer) closeViewer(); });
+
+  // pasos de una respuesta: se van añadiendo mientras Claude trabaja y luego se pliegan en una línea
+  async function runSteps(out, steps, isStopped, seed) {
+    const box = document.createElement("div"); box.className = "steps open";
+    box.innerHTML = `<button type="button" class="steps-head"><span class="spin">✻</span><span class="sh-t">Trabajando…</span><span class="sh-thumbs"></span>${ico("M4 6l4 4 4-4").replace('class="ico"', 'class="ico chev"')}</button><ol class="steps-list"></ol>`;
+    out.append(box);
+    const list = box.querySelector(".steps-list"), thumbs = box.querySelector(".sh-thumbs");
+    box.querySelector(".steps-head").onclick = () => box.classList.toggle("open");
+    const shots = [];
+    for (let i = 0; i < steps.length; i++) {
+      if (isStopped()) return;
+      const st = steps[i];
+      const li = document.createElement("li"); li.className = "step run";
+      li.innerHTML = `${ico(STEP_ICONS[st.label] || STEP_ICONS.Leer)}<span class="lbl"></span><span class="det"></span>`;
+      li.querySelector(".lbl").textContent = st.label; li.querySelector(".det").textContent = st.det || "";
+      list.append(li); scrollDown();
+      await wait(450 + Math.random() * 500);
+      if (isStopped()) { li.classList.remove("run"); return; }
+      li.classList.remove("run");
+      if (st.shot) {
+        const url = shotURL(st.shot, seed + i);
+        const item = { kind: st.shot, seed: seed + i, get url() { return shotURL(this.kind, this.seed); }, label: st.label, det: st.det, n: i + 1, total: steps.length };
+        shots.push(item);
+        const im = document.createElement("img"); im.className = "shot"; im.src = url; im.alt = `Captura: ${st.label}`;
+        im.dataset.shot = st.shot; im.dataset.seed = seed + i;
+        const bt = document.createElement("button"); bt.type = "button"; bt.className = "shot-btn"; bt.title = "Ver la captura"; bt.append(im);
+        bt.onclick = () => openViewer(shots, shots.indexOf(item));
+        li.append(bt);
+        const mini = im.cloneNode(); mini.className = "mini"; thumbs.append(mini);
+        scrollDown();
+      }
+    }
+    box.querySelector(".steps-head .spin").remove();
+    box.querySelector(".sh-t").textContent = `${steps.length} pasos`;
+    box.classList.remove("open"); // plegado: una línea con las miniaturas; se abre al pulsar
+  }
+
+  // encuesta: eliges con clic o con su número (1, 2, 3…) o escribes otra respuesta
+  let poll = null; // { el, opts, done }
+  function renderPoll(out, pq) {
+    const el = document.createElement("div"); el.className = "poll"; el.setAttribute("role", "group");
+    el.innerHTML = `<p class="poll-q"></p><div class="poll-opts"></div>
+      <form class="poll-other"><input type="text" placeholder="Otra respuesta…" aria-label="Otra respuesta" spellcheck="false"><button type="submit" class="tb-btn">Enviar</button></form>
+      <p class="poll-hint">Pulsa el número, haz clic o escribe tu respuesta</p>`;
+    el.querySelector(".poll-q").textContent = pq.q;
+    const box = el.querySelector(".poll-opts");
+    const p = { el, opts: pq.opts, done: false };
+    pq.opts.forEach((o, i) => {
+      const bt = document.createElement("button"); bt.type = "button"; bt.className = "poll-opt";
+      bt.innerHTML = `<kbd>${i + 1}</kbd><span></span>${ico("M3.5 8.5l3 3 6-7").replace('class="ico"', 'class="ico ok"')}`;
+      bt.querySelector("span").textContent = o;
+      bt.onclick = () => answerPoll(p, o, i);
+      box.append(bt);
+    });
+    el.querySelector(".poll-other").addEventListener("submit", e => {
+      e.preventDefault(); const v = e.target.querySelector("input").value.trim(); if (v) answerPoll(p, v, -1);
+    });
+    out.append(el); poll = p; scrollDown();
+    return p;
+  }
+  function answerPoll(p, text, i) {
+    if (p.done) return;
+    p.done = true; if (poll === p) poll = null;
+    p.el.classList.add("answered");
+    p.el.querySelectorAll(".poll-opt").forEach((b, j) => { b.disabled = true; b.classList.toggle("chosen", j === i); });
+    p.el.querySelector(".poll-other").remove(); p.el.querySelector(".poll-hint").remove();
+    if (i < 0) { const c = document.createElement("p"); c.className = "poll-own"; c.textContent = "› " + text; p.el.append(c); }
+    const b = block({ prompt: i >= 0 ? `${i + 1}. ${text}` : text });
+    if (window.cumuloMonitor) window.cumuloMonitor.addMessage(text.length, 0);
+    respond(b, [], `Perfecto: «${text}». Me pongo con ello.`);
+  }
+
   let replyN = 0;
-  function respond(b, imgs) {
+  function respond(b, imgs, forced) {
     b.el.classList.add("running", "reply");
     const id = ++run;
+    const chat = !!(current && current.chat);
     const thinking = outLine(b.out, "", "thinking");
     thinking.innerHTML = `<span class="spin">✻</span> Pensando…\n`;
     let stopped = false;
+    const R = forced ? { text: forced } : (chat ? CHAT_REPLIES : REPLIES)[replyN++ % REPLIES.length];
     const text = (imgs.length ? `Veo ${imgs.length === 1 ? "la imagen que has adjuntado" : `las ${imgs.length} imágenes que has adjuntado`}. ` : "")
-      + (current && current.chat ? CHAT_REPLIES : REPLIES)[replyN++ % REPLIES.length] + "\n(Simulación: aquí respondería Claude de verdad.)";
+      + R.text + (R.poll ? "" : "\n(Simulación: aquí respondería Claude de verdad.)");
+    // pasos: en Code, 3 o 4 acciones terminando en una con captura; en Ask, búsqueda y lectura
+    const pool = chat ? ASK_STEPS : CODE_STEPS;
+    const steps = chat ? pool.slice(0, 2 + (replyN % 2)) : [pool[replyN % 2], pool[2], pool[3], ...(replyN % 2 ? [] : [pool[4]])];
     const finish = how => {
       if (streaming && streaming.id !== id) return;
       streaming = null; setBusy(false); b.el.classList.remove("running");
@@ -1147,10 +1314,12 @@
     streaming = { id, stop() { stopped = true; run++; thinking.remove(); finish("stop"); } };
     setBusy(true);
     (async () => {
-      await wait(700 + Math.random() * 500);
+      await wait(600 + Math.random() * 400);
       if (stopped || id !== run) return;
       thinking.remove();
-      const span = document.createElement("span"); b.out.append(span);
+      await runSteps(b.out, steps, () => stopped || id !== run, hash(String(replyN) + Date.now()) % 100000);
+      if (stopped || id !== run) return;
+      const span = document.createElement("span"); span.className = "reply-text"; b.out.append(span);
       const caret = document.createElement("span"); caret.className = "caret"; b.out.append(caret);
       for (const word of text.split(/(\s+)/)) {
         if (stopped || id !== run) return;
@@ -1158,6 +1327,8 @@
         await wait(word.trim() ? 35 + Math.random() * 70 : 0);
       }
       if (window.cumuloMonitor) window.cumuloMonitor.addMessage(text.length, 0);
+      caret.remove();
+      if (R.poll) renderPoll(b.out, R.poll);
       finish("done");
     })();
   }
@@ -1200,6 +1371,10 @@
   function autosize() { sInput.style.height = "auto"; sInput.style.height = Math.min(sInput.scrollHeight, 172) + "px"; }
   sInput.addEventListener("input", () => { autosize(); updateSend(); });
   sInput.addEventListener("keydown", e => {
+    if (poll && !poll.done && !sInput.value && /^[1-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const i = +e.key - 1;
+      if (i < poll.opts.length) { e.preventDefault(); answerPoll(poll, poll.opts[i], i); return; }
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !matchMedia("(pointer: coarse)").matches) { e.preventDefault(); sForm.requestSubmit(); }
   });
   sForm.addEventListener("submit", e => {
@@ -1207,6 +1382,7 @@
     if (streaming) { streaming.stop(); return; }
     const text = sInput.value.trim();
     if (!text && !attachments.length) return;
+    if (poll && !poll.done && text && !attachments.length) { sInput.value = ""; autosize(); answerPoll(poll, text, -1); return; }
     const imgs = attachments; attachments = [];
     sAttach.innerHTML = ""; sAttach.hidden = true;
     sInput.value = ""; autosize();
@@ -1221,11 +1397,7 @@
     if (!p) return;
     const b = block({ prompt: "" }); b.el.classList.add("pending", "reply", p.kind);
     if (p.kind === "done") outLine(b.out, p.text);
-    else {
-      outLine(b.out, p.q);
-      p.opts.forEach((o, i) => outLine(b.out, `  ${i + 1}. ${o}`, "opt"));
-      outLine(b.out, "Responde con el número o escribe lo que prefieras.", "d");
-    }
+    else renderPoll(b.out, p);
   }
   async function intro(s, proj, id) {
     if (current && current.chat) { // un chat se lee como conversación, no como terminal
@@ -1271,7 +1443,7 @@
     $("sCopy").querySelector("span").textContent = chat ? "Copiar enlace" : "Copiar orden";
     sInput.placeholder = chat ? "Pregunta a Claude…" : "Escribe a Claude…";
     if (streaming) streaming.stop();
-    sLog.innerHTML = ""; sInput.value = ""; autosize();
+    sLog.innerHTML = ""; sInput.value = ""; autosize(); poll = null; closeViewer();
     attachments = []; sAttach.innerHTML = ""; sAttach.hidden = true; updateSend();
 
     const motion = !reduced();
@@ -1511,6 +1683,11 @@
   // teclado (como en Claude Code: Esc para una respuesta en curso; si no hay ninguna, vuelve al cúmulo)
   window.addEventListener("keydown", e => {
     const inSession = sessionEl.classList.contains("open");
+    if (inSession && viewerOpen()) {
+      if (e.key === "Escape") { closeViewer(); return; }
+      if (e.key === "ArrowLeft") { showShot(vIdx - 1); return; }
+      if (e.key === "ArrowRight") { showShot(vIdx + 1); return; }
+    }
     if (e.key === "Escape") {
       if (inSession) { if (streaming) streaming.stop(); else closeSession(); }
       else if (cancelOpen()) { /* entrada cancelada */ }
