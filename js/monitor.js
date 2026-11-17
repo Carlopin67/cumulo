@@ -1,4 +1,4 @@
-// Monitor del sistema — columna de la sesión con CPU, RAM, VRAM, disco, red y Claude, y debajo los límites de uso.
+// Monitor del sistema — columna de la sesión con CPU, RAM, VRAM, disco, red y Claude; debajo, los límites de uso y la ventana de contexto.
 // Los datos salen de window.CUMULO_SYSTEM.read(). Si no existe, se usan datos simulados.
 // Forma de cada lectura (lo único que tendrá que dar la versión instalable):
 //   { cpu:   { usage %, cores, ghz, temp °C },
@@ -260,7 +260,7 @@
       <canvas class="orbit-cv" aria-hidden="true"></canvas>
       <div class="orbit-info"></div>
     </div>
-    <p class="orbit-key"><span class="k-arc"></span>gastado <span class="k-dot"></span>tiempo pasado <span class="k-tick"></span>1 día · 1 h</p>`;
+    <p class="orbit-key"><span class="k-arc"></span>gastado <span class="k-dot"></span>tiempo <span class="k-tick"></span>día / hora</p>`;
   const orbitCv = limitsEl.querySelector(".orbit-cv"), info = limitsEl.querySelector(".orbit-info");
   LIMITS.forEach(L => {
     const d = document.createElement("div"); d.className = "oi";
@@ -366,6 +366,82 @@
       g.strokeStyle = colors.ink; g.lineWidth = 1.4; g.beginPath(); g.arc(px, py, 3.2, 0, TAU); g.stroke();
     }
   }
+
+  // ── ventana de contexto de la sesión abierta ────────────────
+  // Como `/context` de Claude Code: 100 casillas (1 % cada una) repartidas por categorías.
+  // Simulado a partir de la sesión; la versión instalable lo leerá de la sesión real.
+  // Desde app.js: window.cumuloMonitor.setSession(sesión | null) y .addMessage(caracteres, imágenes).
+  const CTX_TOTAL = 200000, CTX_RESERVE = 45000; // reserva antes de autocompactar
+  const CTX_CATS = [
+    { k: "system", label: "Sistema", a: 0.3 },
+    { k: "tools", label: "Herramientas", a: 0.45 },
+    { k: "mcp", label: "MCP", a: 0.6 },
+    { k: "memory", label: "Memoria", a: 0.78 },
+    { k: "messages", label: "Mensajes", a: 1, accent: true },
+  ];
+  const ctxEl = document.getElementById("monContext");
+  ctxEl.innerHTML = `
+    <p class="ctx-sum"><b class="ctx-used"></b><span class="ctx-of"> / 200k</span><span class="ctx-pct"></span></p>
+    <div class="ctx-grid" aria-hidden="true">${Array.from({ length: 100 }, () => "<i></i>").join("")}</div>
+    <ul class="ctx-legend">${CTX_CATS.map(c => `<li data-k="${c.k}"><span class="sw"></span><span class="nm">${c.label}</span><span class="tk"></span></li>`).join("")}
+      <li data-k="free"><span class="sw"></span><span class="nm">Libre</span><span class="tk"></span></li>
+      <li data-k="reserve"><span class="sw"></span><span class="nm">Reserva</span><span class="tk"></span></li>
+    </ul>
+    <p class="ctx-note"></p>`;
+  const cells = [...ctxEl.querySelectorAll(".ctx-grid i")];
+  const kfmt = n => n >= 1000 ? `${f1.format(n / 1000)}k` : f0.format(n);
+  let ctx = null;
+
+  function renderContext(fresh) {
+    if (!ctx) return;
+    const used = CTX_CATS.reduce((a, c) => a + ctx[c.k], 0);
+    const free = Math.max(0, CTX_TOTAL - CTX_RESERVE - used);
+    ctxEl.querySelector(".ctx-used").textContent = kfmt(used);
+    ctxEl.querySelector(".ctx-pct").textContent = ` · ${f0.format(used / CTX_TOTAL * 100)} %`;
+    CTX_CATS.forEach(c => { ctxEl.querySelector(`[data-k="${c.k}"] .tk`).textContent = kfmt(ctx[c.k]); });
+    ctxEl.querySelector('[data-k="free"] .tk').textContent = kfmt(free);
+    ctxEl.querySelector('[data-k="reserve"] .tk').textContent = kfmt(CTX_RESERVE);
+    const leftPct = free / CTX_TOTAL * 100;
+    const note = ctxEl.querySelector(".ctx-note");
+    note.textContent = free > 0 ? `quedan ${kfmt(free)} antes de compactar` : "se compactará en la próxima respuesta";
+    ctxEl.dataset.level = leftPct < 5 ? "crit" : leftPct < 15 ? "warn" : "";
+
+    // casillas: cada categoría ocupa las que le tocan (mínimo una si tiene algo), luego libre y reserva al final
+    const counts = CTX_CATS.map(c => ctx[c.k] > 0 ? Math.max(1, Math.round(ctx[c.k] / CTX_TOTAL * 100)) : 0);
+    const reserveN = Math.round(CTX_RESERVE / CTX_TOTAL * 100);
+    let i = 0;
+    CTX_CATS.forEach((c, ci) => {
+      for (let n = 0; n < counts[ci] && i < 100 - reserveN; n++, i++) {
+        const el = cells[i], was = el.dataset.k;
+        el.dataset.k = c.k; el.style.setProperty("--a", c.a);
+        if (!fresh && was !== c.k) { el.classList.remove("pop"); void el.offsetWidth; el.classList.add("pop"); }
+      }
+    });
+    for (; i < 100 - reserveN; i++) { cells[i].dataset.k = "free"; cells[i].style.removeProperty("--a"); }
+    for (; i < 100; i++) { cells[i].dataset.k = "reserve"; cells[i].style.removeProperty("--a"); }
+    if (fresh) {
+      ctxEl.classList.remove("enter"); void ctxEl.offsetWidth; ctxEl.classList.add("enter");
+      cells.forEach((el, n) => el.style.setProperty("--d", `${n * 6}ms`));
+    }
+  }
+
+  window.cumuloMonitor = {
+    setSession(s) {
+      const msgs = s ? s.messages : 0;
+      const seed = s ? s.id.charCodeAt(0) + s.id.charCodeAt(1) : 7;
+      ctx = {
+        system: 3100, tools: 11600, mcp: 2400 + (seed % 5) * 900, memory: 1200 + (seed % 7) * 260,
+        messages: Math.min(120000, msgs * 980 + (seed % 11) * 400),
+      };
+      renderContext(true);
+    },
+    addMessage(chars, images) {
+      if (!ctx) return;
+      ctx.messages = Math.min(CTX_TOTAL - CTX_RESERVE - 19000, ctx.messages + Math.round(chars / 3.6) + (images || 0) * 1600 + 120);
+      renderContext(false);
+    },
+  };
+  window.cumuloMonitor.setSession(null);
 
   const sessionEl = document.getElementById("session");
   let last = 0;

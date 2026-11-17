@@ -370,11 +370,43 @@ kbd { font-family: var(--font); font-size: 10px; color: var(--muted); border: 1p
 .oi-sub { color: var(--muted); margin-top: 2px; }
 .oi[data-level="warn"] b, .oi[data-level="warn"] .oi-proj { color: var(--warn); }
 .oi[data-level="crit"] b, .oi[data-level="crit"] .oi-proj { color: var(--crit); }
-.orbit-key { display: flex; align-items: center; gap: 6px; font-size: 9.5px; color: var(--faint); padding: 6px 0 2px; }
+.orbit-key { display: flex; align-items: center; gap: 6px; font-size: 9.5px; color: var(--faint); padding: 6px 0 2px; white-space: nowrap; }
 .k-arc { position: relative; width: 14px; height: 2px; margin-right: 5px; background: linear-gradient(90deg, transparent, var(--ink)); }
 .k-arc::after { content: ""; position: absolute; right: -2px; top: -2px; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); box-shadow: 0 0 5px var(--ink); }
 .k-dot { width: 7px; height: 7px; border-radius: 50%; border: 1.3px solid var(--ink); margin-left: 8px; }
 .k-tick { width: 3px; height: 3px; border-radius: 50%; background: var(--muted); margin-left: 8px; }
+
+/* ventana de contexto: 100 casillas, 1 % cada una */
+.ctx-sum { display: flex; align-items: baseline; gap: 2px; padding: 2px 2px 8px; font-variant-numeric: tabular-nums; }
+.ctx-used { font-weight: 500; font-size: 12.5px; transition: color var(--t-med); }
+.ctx-of, .ctx-pct { font-size: 10px; color: var(--muted); }
+#monContext[data-level="warn"] .ctx-used, #monContext[data-level="warn"] .ctx-note { color: var(--warn); }
+#monContext[data-level="crit"] .ctx-used, #monContext[data-level="crit"] .ctx-note { color: var(--crit); }
+.ctx-grid { display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); gap: 3px; }
+.ctx-grid i { aspect-ratio: 1; border-radius: 2px; background: var(--line); transition: background-color .4s, box-shadow .4s, opacity .4s; }
+.ctx-grid i[data-k="system"], .ctx-grid i[data-k="tools"], .ctx-grid i[data-k="mcp"], .ctx-grid i[data-k="memory"] {
+  background: color-mix(in srgb, var(--ink) calc(var(--a) * 100%), transparent);
+}
+.ctx-grid i[data-k="messages"] { background: var(--accent); box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 45%, transparent); }
+.ctx-grid i[data-k="free"] { background: transparent; box-shadow: inset 0 0 0 1px var(--line-2); }
+.ctx-grid i[data-k="reserve"] { background: repeating-linear-gradient(135deg, var(--line-2) 0 1px, transparent 1px 3px); }
+.ctx-grid i.pop { animation: ctxPop .6s var(--ease-out); }
+@keyframes ctxPop { 0% { transform: scale(.3); filter: brightness(2); } }
+#monContext.enter .ctx-grid i { animation: ctxIn .5s var(--ease-out) backwards; animation-delay: calc(var(--d, 0ms) + 250ms); }
+@keyframes ctxIn { from { opacity: 0; transform: scale(.4); } }
+.ctx-legend { list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 3px; margin-top: 10px; font-size: 10px; }
+.ctx-legend li { display: flex; align-items: center; gap: 6px; color: var(--muted); min-width: 0; }
+.ctx-legend .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx-legend .tk { margin-left: auto; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.ctx-legend .sw { flex: none; width: 7px; height: 7px; border-radius: 2px; background: var(--line); }
+.ctx-legend [data-k="system"] .sw { background: color-mix(in srgb, var(--ink) 30%, transparent); }
+.ctx-legend [data-k="tools"] .sw { background: color-mix(in srgb, var(--ink) 45%, transparent); }
+.ctx-legend [data-k="mcp"] .sw { background: color-mix(in srgb, var(--ink) 60%, transparent); }
+.ctx-legend [data-k="memory"] .sw { background: color-mix(in srgb, var(--ink) 78%, transparent); }
+.ctx-legend [data-k="messages"] .sw { background: var(--accent); }
+.ctx-legend [data-k="free"] .sw { background: transparent; box-shadow: inset 0 0 0 1px var(--line-2); }
+.ctx-legend [data-k="reserve"] .sw { background: repeating-linear-gradient(135deg, var(--line-2) 0 1px, transparent 1px 3px); }
+.ctx-note { font-size: 10px; color: var(--faint); text-align: right; margin-top: 8px; font-variant-numeric: tabular-nums; }
 
 /* entrada del contenido de la sesión */
 .s-term, .composer, .monitor { transition: opacity .45s var(--ease-out) .25s; }

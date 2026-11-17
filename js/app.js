@@ -762,6 +762,7 @@
         span.textContent += word; scrollDown();
         await wait(word.trim() ? 35 + Math.random() * 70 : 0);
       }
+      if (window.cumuloMonitor) window.cumuloMonitor.addMessage(text.length, 0);
       finish("done");
     })();
   }
@@ -815,6 +816,7 @@
     sAttach.innerHTML = ""; sAttach.hidden = true;
     sInput.value = ""; autosize();
     const b = block({ prompt: text || (imgs.length === 1 ? "(imagen)" : `(${imgs.length} imágenes)`), imgs });
+    if (window.cumuloMonitor) window.cumuloMonitor.addMessage(text.length, imgs.length);
     respond(b, imgs);
   });
   sScroll.addEventListener("click", () => { if (!String(window.getSelection())) sInput.focus({ preventScroll: true }); });
@@ -834,6 +836,7 @@
   }
 
   function openSession(s, origin) {
+    if (window.cumuloMonitor) window.cumuloMonitor.setSession(s);
     const proj = s ? s.proj : ((selected && selected.proj) || hoverProject || projList[0]);
     current = { s, proj };
     $("sProject").innerHTML = proj ? dotHTML(proj) : "";
