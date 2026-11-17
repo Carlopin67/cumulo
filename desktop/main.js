@@ -9,6 +9,12 @@ const { execFile } = require("child_process");
 const pty = require("@lydell/node-pty");
 const si = require("systeminformation");
 const sesiones = require("./sesiones");
+const ventanas = require("./ventanas");
+
+// --shell: Cúmulo hace de escritorio de Windows (lo arranca Windows en lugar del explorador)
+const SHELL = process.argv.includes("--shell");
+const LOG = [];
+const log = m => { LOG.push(new Date().toISOString().slice(11, 19) + " " + m); if (LOG.length > 300) LOG.shift(); };
 
 const WEB = app.isPackaged ? path.join(__dirname, "web") : path.join(__dirname, "..");
 const XTERM = path.relative(WEB, path.join(__dirname, "node_modules", "@xterm")).split(path.sep).join("/");
@@ -205,6 +211,27 @@ ipcMain.handle("os:power", (_e, what) => {
   else if (what === "settings") shell.openExternal("ms-settings:");
   else if (what === "explorer") shell.openPath(os.homedir());
   else if (what === "taskmgr") run("taskmgr.exe", []);
+  else if (what === "logoff") run("shutdown", ["/l"]);
+});
+
+// ventanas de otras apps: la barra de tareas de Cúmulo
+const UD = () => app.getPath("userData");
+ipcMain.handle("win:list", () => ventanas.list(UD(), process.pid).catch(() => []));
+ipcMain.handle("win:focus", (_e, h) => ventanas.focus(h, UD()));
+ipcMain.handle("win:min", (_e, h) => ventanas.minimize(h, UD()));
+ipcMain.handle("win:close", (_e, h) => ventanas.close(h, UD()));
+
+// Cúmulo como escritorio de Windows
+ipcMain.handle("shell:get", async () => {
+  const v = await ventanas.shellGet();
+  return { running: SHELL, enabled: !!(v && /c[uú]mulo/i.test(v)), packaged: app.isPackaged };
+});
+ipcMain.handle("shell:set", async (_e, on) => {
+  if (on && !app.isPackaged) return { ok: false, why: "Solo desde la app instalada" };
+  const ok = await ventanas.shellSet(on ? process.execPath : null, app.getPath("userData"));
+  // al volver a Windows normal estando de escritorio, el explorador entra ya como escritorio y barra de tareas
+  if (!on && SHELL) execFile("explorer.exe", [], { windowsHide: false });
+  return { ok };
 });
 
 // ajustes de la app: pantalla completa, arrancar con Windows y atajo global
@@ -218,7 +245,8 @@ ipcMain.handle("cfg:set", (_e, patch) => {
 });
 ipcMain.on("win:fullscreen", () => { if (win) win.setFullScreen(!win.isFullScreen()); });
 ipcMain.on("win:minimize", () => { if (win) win.minimize(); });
-ipcMain.on("win:hide", () => { if (win) win.hide(); }); // a la bandeja: las sesiones siguen vivas
+ipcMain.on("win:hide", () => { if (!win) return; if (SHELL) win.minimize(); else win.hide(); }); // a la bandeja (sin bandeja, si es el escritorio)
+ipcMain.on("app:shell", e => { e.returnValue = SHELL; });
 ipcMain.on("win:sync", e => { e.returnValue = win ? win.isFullScreen() : true; });
 
 function toggleWindow() {
@@ -256,7 +284,9 @@ function createWindow() {
     if (i.type === "keyDown" && i.control && i.key.toLowerCase() === "r" && i.shift) win.webContents.reload();
   });
   // cerrar la ventana la esconde en la bandeja: las sesiones siguen vivas
-  win.on("close", e => { if (!app.isQuitting) { e.preventDefault(); win.hide(); } });
+  win.on("close", e => { if (!app.isQuitting) { e.preventDefault(); if (SHELL) win.minimize(); else win.hide(); } });
+  // si el proceso de la página se cae, se vuelve a cargar (como escritorio no puede quedarse en negro)
+  win.webContents.on("render-process-gone", () => { setTimeout(() => { if (win && !win.isDestroyed()) win.reload(); }, 800); });
 }
 
 function createTray() {
@@ -273,6 +303,7 @@ function createTray() {
 
 app.on("second-instance", () => { if (win) { win.show(); win.focus(); } });
 app.whenReady().then(async () => {
+  if (SHELL) ventanas.runStartup(log).catch(() => {});
   createWindow();
   createTray();
   registerShortcut();
@@ -280,5 +311,5 @@ app.whenReady().then(async () => {
   sysTick(); setInterval(() => sysTick().catch(() => {}), 1000);
   claudeTick(); setInterval(claudeTick, 5000);
 });
-app.on("will-quit", () => { globalShortcut.unregisterAll(); for (const t of terms.values()) { try { t.p.kill(); } catch { /* ya cerrado */ } } });
+app.on("will-quit", () => { ventanas.stop(); globalShortcut.unregisterAll(); for (const t of terms.values()) { try { t.p.kill(); } catch { /* ya cerrado */ } } });
 app.on("window-all-closed", () => { /* sigue en la bandeja */ });

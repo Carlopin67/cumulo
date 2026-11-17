@@ -166,7 +166,9 @@
     </div>`;
   document.body.append(pal);
   const pIn = pal.querySelector("input"), pList = pal.querySelector(".pal-list");
-  let apps = [], items = [], sel = 0, cfg = {}, findSeq = 0;
+  let apps = [], items = [], sel = 0, cfg = {}, findSeq = 0, shellSt = { enabled: false, running: D.isShell }, wins = [];
+  const refreshShell = () => D.shellGet().then(v => { shellSt = v; });
+  refreshShell();
   D.apps().then(a => { apps = a; });
   D.getConfig().then(c => { cfg = c; pal.querySelector(".pal-sc").textContent = c.shortcut ? `${c.shortcut.replace("Space", "Espacio")} desde cualquier sitio` : ""; });
 
@@ -176,6 +178,7 @@
     file: '<path d="M4 1.8h5.2L12.4 5v9.2H4z"/><path d="M9 1.8V5h3.4"/>',
     star: '<path d="M8 1.8v12.4M1.8 8h12.4M3.6 3.6l8.8 8.8M12.4 3.6l-8.8 8.8"/>',
     act: '<path d="M8 2v5M4.6 4.1a5 5 0 1 0 6.8 0"/>',
+    win: '<rect x="2" y="3" width="12" height="10" rx="1.4"/><path d="M2 5.8h12"/>',
     term: '<rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.4"/><path d="M4.4 6.4 6.6 8.2 4.4 10M8 10.4h3.4"/>',
   };
   const ACTIONS = () => [
@@ -186,6 +189,10 @@
     { kind: "act", icon: "act", name: "Administrador de tareas", run: () => D.power("taskmgr") },
     { kind: "act", icon: "act", name: root.classList.contains("fullscreen") ? "Salir de pantalla completa" : "Pantalla completa", hint: "F11 · al abrir Cúmulo siempre vuelve a pantalla completa", run: () => D.toggleFullscreen() },
     { kind: "act", icon: "act", name: cfg.autostart ? "No arrancar Cúmulo con Windows" : "Arrancar Cúmulo con Windows", hint: cfg.autostart ? "Ahora arranca al encender" : "Se abre al encender el ordenador", run: async () => { cfg = await D.setConfig({ autostart: !cfg.autostart }); } },
+    shellSt.enabled
+      ? { kind: "act", icon: "act", name: "Volver al escritorio normal de Windows", hint: "Vuelven la barra de tareas y el escritorio de siempre", confirm: true, run: async () => { await D.shellSet(false); refreshShell(); } }
+      : { kind: "act", icon: "act", name: "Usar Cúmulo como escritorio de Windows", hint: "Al entrar en Windows solo estará Cúmulo (se deshace desde aquí)", confirm: true, run: async () => { await D.shellSet(true); refreshShell(); } },
+    { kind: "act", icon: "act", name: "Cerrar sesión de Windows", confirm: true, run: () => D.power("logoff") },
     { kind: "act", icon: "act", name: "Bloquear el ordenador", run: () => D.power("lock") },
     { kind: "act", icon: "act", name: "Suspender", run: () => D.power("sleep") },
     { kind: "act", icon: "act", name: "Reiniciar", hint: "Cierra las sesiones abiertas", confirm: true, run: () => D.power("restart") },
@@ -202,11 +209,15 @@
     const pick = (list, map, max) => list.map(x => ({ x, s: score(map(x), q) })).filter(o => o.s).sort((a, b) => b.s - a.s).slice(0, max).map(o => o.x);
     const sess = (window.CUMULO_DATA.sessions || []).slice().sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive));
     const out = [];
+    wins = window.__cumuloWins || [];
+    const W = wins.map(w => ({ kind: "win", icon: "win", name: w.title, hint: w.name, h: w.h, path: w.path }));
     if (!q) {
+      out.push(...W.slice(0, 6));
       out.push(...ACTIONS().slice(0, 3));
       out.push(...sess.slice(0, 5).map(s => ({ kind: "sess", icon: "star", name: s.title, hint: s.projectName || s.project.split(/[\\/]/).pop(), id: s.id })));
       out.push(...apps.slice(0, 0));
     } else {
+      out.push(...pick(W, w => w.name + " " + w.hint, 4));
       out.push(...pick(apps, a => a.name, 6).map(a => ({ kind: "app", icon: "app", name: a.name, hint: a.group, path: a.path })));
       out.push(...pick(ACTIONS(), a => a.name, 4));
       out.push(...pick(sess, s => s.title + " " + s.project, 5).map(s => ({ kind: "sess", icon: "star", name: s.title, hint: s.projectName || s.project.split(/[\\/]/).pop(), id: s.id })));
@@ -214,7 +225,7 @@
     }
     return out;
   }
-  const LABEL = { app: "App", act: "Acción", sess: "Sesión", dir: "Carpeta", file: "Archivo" };
+  const LABEL = { app: "App", act: "Acción", sess: "Sesión", dir: "Carpeta", file: "Archivo", win: "Abierta" };
   function render() {
     pList.innerHTML = "";
     items.forEach((it, i) => {
@@ -222,7 +233,7 @@
       li.setAttribute("aria-selected", String(i === sel));
       li.innerHTML = `<span class="pi-ico"><svg viewBox="0 0 16 16" aria-hidden="true">${I[it.icon]}</svg></span><span class="pi-txt"><b></b><small></small></span><span class="pi-kind">${it.confirmArm ? "Pulsa otra vez" : LABEL[it.kind]}</span>`;
       li.querySelector("b").textContent = it.name; li.querySelector("small").textContent = it.hint || "";
-      if (it.kind === "app") D.icon(it.path).then(u => { if (u) li.querySelector(".pi-ico").innerHTML = `<img alt="" src="${u}">`; });
+      if ((it.kind === "app" || it.kind === "win") && it.path) D.icon(it.path).then(u => { if (u) li.querySelector(".pi-ico").innerHTML = `<img alt="" src="${u}">`; });
       li.onmousemove = () => { if (sel !== i) { sel = i; mark(); } };
       li.onclick = e => exec(it, e.ctrlKey);
       pList.append(li);
@@ -237,9 +248,10 @@
   }
   async function exec(it, reveal) {
     if (it.confirm && !it.confirmArm) { it.confirmArm = true; render(); return; } // las acciones que apagan piden dos pulsaciones
-    if (reveal && it.path) { D.reveal(it.path); closePal(); return; }
+    if (reveal && it.path && it.kind !== "win") { D.reveal(it.path); closePal(); return; }
     closePal();
     if (it.kind === "sess") window.cumulo && window.cumulo.openById(it.id);
+    else if (it.kind === "win") D.winFocus(it.h);
     else if (it.run) it.run();
     else if (it.path) D.open(it.path);
   }
@@ -270,4 +282,52 @@
   }, true);
   D.onPalette(openPal);
   window.cumuloPalette = { open: openPal, close: closePal, isOpen: () => !pal.hidden };
+})();
+
+// ── barra de tareas: las ventanas abiertas de otras apps, junto a las sesiones ──
+(() => {
+  const D = window.cumuloDesktop;
+  if (!D) return;
+  const dock = document.getElementById("dock");
+  const bar = document.createElement("nav");
+  bar.className = "appbar"; bar.setAttribute("aria-label", "Ventanas abiertas");
+  dock.after(bar);
+  const els = new Map(); // h → botón
+  const icons = new Map();
+  let busy = false;
+  async function tick() {
+    if (busy || document.hidden) return; busy = true;
+    try {
+      const list = await D.windows();
+      window.__cumuloWins = list;
+      const seen = new Set();
+      list.forEach(w => {
+        seen.add(w.h);
+        let b = els.get(w.h);
+        if (!b) {
+          b = document.createElement("button"); b.type = "button"; b.className = "app-item";
+          b.innerHTML = `<span class="ai-ico"></span><span class="t"></span><span class="x" aria-label="Cerrar ventana"><svg class="ico" viewBox="0 0 16 16"><path d="M5 5l6 6M11 5l-6 6"/></svg></span>`;
+          b.onclick = e => {
+            if (e.target.closest(".x")) { D.winClose(w.h); return; }
+            if (b.dataset.fg === "1" && !b.dataset.min) D.winMin(w.h); else D.winFocus(w.h);
+            setTimeout(tick, 250);
+          };
+          b.onauxclick = e => { if (e.button === 1) D.winClose(w.h); };
+          els.set(w.h, b); bar.append(b);
+          const key = w.path || w.name;
+          const setIco = u => { if (u) b.querySelector(".ai-ico").innerHTML = `<img alt="" src="${u}">`; };
+          if (icons.has(key)) setIco(icons.get(key));
+          else if (w.path) D.icon(w.path).then(u => { icons.set(key, u); setIco(u); });
+        }
+        b.querySelector(".t").textContent = w.title;
+        b.title = `${w.title} — ${w.name}  (clic: traer · clic central: cerrar)`;
+        b.dataset.fg = w.fg ? "1" : ""; b.dataset.min = w.min ? "1" : "";
+      });
+      els.forEach((b, h) => { if (!seen.has(h)) { b.remove(); els.delete(h); } });
+      bar.classList.toggle("empty", !els.size);
+    } catch { /* sin datos esta vez */ }
+    busy = false;
+  }
+  tick(); setInterval(tick, 2000);
+  window.addEventListener("focus", tick);
 })();

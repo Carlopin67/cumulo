@@ -707,3 +707,18 @@ html.desktop .s-tabs button, html.desktop .s-tabs .s-idchip { -webkit-app-region
 html:not(.fullscreen) .win-ctl .fs-out { display: none; }
 html:not(.fullscreen) .win-ctl .fs-in { display: inline; }
 .pal-list { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+/* barra de tareas: ventanas de otras apps */
+.appbar { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 0 1 auto; margin-right: auto; overflow: hidden; margin-left: -8px; padding-left: 8px; border-left: 1px solid var(--line); }
+.appbar.empty { display: none; }
+.app-item { position: relative; display: flex; align-items: center; gap: 7px; height: 22px; max-width: 190px; min-width: 0; padding: 0 8px; color: var(--muted); border-radius: 4px; transition: color var(--t-fast), background var(--t-fast); }
+.app-item:hover { color: var(--ink); background: var(--hover); }
+.app-item .ai-ico { display: grid; place-items: center; width: 16px; height: 16px; flex: none; }
+.app-item .ai-ico img { width: 16px; height: 16px; }
+.app-item .t { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.app-item[data-fg="1"] { color: var(--ink); }
+.app-item[data-fg="1"]::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -3px; height: 2px; background: var(--accent); }
+.app-item[data-min="1"] .ai-ico { opacity: .55; }
+.app-item .x { display: none; width: 14px; height: 14px; flex: none; }
+.app-item .x .ico { width: 10px; height: 10px; }
+.app-item:hover .x { display: grid; place-items: center; }
+.app-item .x:hover { color: var(--crit); }
