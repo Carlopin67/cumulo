@@ -413,11 +413,13 @@
       let sy = ((b.y - drift.y * b.d) % H + H) % H;
       const a = b.a * th.dustA * (0.7 + 0.3 * Math.sin(t * b.sp + b.tw));
       if (warp > 0.01) {
-        const w = 1 + warp * b.d * (dv ? 2.2 : 1);
+        const w = 1 + warp * (dv ? 0.35 + b.d * 2.6 : b.d);
         const ex = wcx + (sx - wcx) * w, ey = wcy + (sy - wcy) * w;
-        if (dv) { // estela: del punto a su posición estirada
-          ctx.strokeStyle = rgba(th.dust, a * (1 - warp * 0.3)); ctx.lineWidth = b.r * 1.1;
-          ctx.beginPath(); ctx.moveTo(lerp(sx, ex, 0.35), lerp(sy, ey, 0.35)); ctx.lineTo(ex, ey); ctx.stroke();
+        if (dv) { // estela: del punto a su posición estirada, más larga y brillante cuanto más cerca del borde
+          const far = Math.min(1, Math.hypot(ex - wcx, ey - wcy) / (Math.hypot(W, H) / 2));
+          ctx.strokeStyle = rgba(th.dust, Math.min(0.85, a * (1.1 + warp * 0.6) * (0.35 + far)));
+          ctx.lineWidth = b.r * (1 + warp * 0.35);
+          ctx.beginPath(); ctx.moveTo(lerp(sx, ex, 0.08), lerp(sy, ey, 0.08)); ctx.lineTo(ex, ey); ctx.stroke();
           continue;
         }
         sx = ex; sy = ey;
@@ -446,16 +448,22 @@
     if (p >= 1) { dive = null; return null; }
     return Math.max(0, p);
   }
+  // el salto se centra en la pantalla: el foco va de la estrella al centro mientras la cámara llega
+  function diveCenter(p) {
+    const [x, y] = toScreen(dive.s.x, dive.s.y);
+    const c = dive.dir > 0 ? easeOutCubic(clamp(p * 1.6, 0, 1)) : 1 - easeInOutCubic(clamp(p * 1.3, 0, 1));
+    return [lerp(x, W / 2, c), lerp(y, H / 2, c)];
+  }
   function diveWarp() {
     const p = diveProgress(); if (p === null) return null;
-    const [x, y] = toScreen(dive.s.x, dive.s.y);
-    const k = dive.dir > 0 ? Math.sin(Math.PI * Math.min(1, p * 1.15)) * 0.9 : Math.sin(Math.PI * p) * 0.45;
+    const [x, y] = diveCenter(p);
+    const k = dive.dir > 0 ? Math.pow(Math.sin(Math.PI * Math.min(1, p * 1.1)), 0.8) * 1.8 : Math.sin(Math.PI * p) * 0.9;
     return { x, y, k };
   }
   function drawDive(now, light) {
     const p = diveProgress(now); if (p === null) return;
     const s = dive.s, color = colorOf(s.proj);
-    const [x, y] = toScreen(s.x, s.y);
+    const [x, y] = diveCenter(p);
     const far = Math.hypot(Math.max(x, W - x), Math.max(y, H - y)) * 1.15;
     let r, a;
     if (dive.dir > 0) {
@@ -478,6 +486,7 @@
     // al volver, la estrella late al recibir la luz
     if (dive.dir < 0 && p > 0.6) {
       const q = (p - 0.6) / 0.4, R = s.size * Math.pow(cam.z, 0.55);
+      const [x, y] = toScreen(s.x, s.y);
       ctx.strokeStyle = rgba(light ? th.ink : color, (1 - q) * 0.7); ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.arc(x, y, R * (2 + 12 * easeOutCubic(q)), 0, 6.283); ctx.stroke();
     }
@@ -766,7 +775,7 @@
     if (drag) {
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       if (!drag.moved && Math.hypot(dx, dy) > 4) {
-        drag.moved = true; stopMotion(); canvas.classList.add("dragging"); hideHint();
+        drag.moved = true; stopMotion(); canvas.classList.add("dragging");
         drag.x = e.clientX; drag.y = e.clientY; drag.cx = cam.x; drag.cy = cam.y;
       }
       if (drag.moved) {
@@ -793,33 +802,41 @@
     drag = null;
   });
   canvas.addEventListener("pointerleave", () => { if (!drag) { hovered = null; statusHover(null); } });
+  // trackpad: dos dedos desplazan el mapa; pellizcar (o Ctrl + rueda) acerca y aleja
   canvas.addEventListener("wheel", e => {
-    e.preventDefault(); hideHint();
-    zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018)), e.clientX, e.clientY);
+    e.preventDefault();
+    if (e.ctrlKey) { zoomAt(Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY); return; }
+    tween = null; zoomGoal = null; inertia = null;
+    const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H : 1; // líneas o páginas → píxeles
+    cam.x += e.deltaX * k / cam.z; cam.y += e.deltaY * k / cam.z;
   }, { passive: false });
+  function statusHover() {} // la barra inferior ya no muestra lo que hay bajo el cursor
 
-  const viewCenter = () => [(W - panelW()) / 2, H / 2];
-  document.getElementById("zoomIn").onclick = () => zoomAt(1.5, ...viewCenter());
-  document.getElementById("zoomOut").onclick = () => zoomAt(1 / 1.5, ...viewCenter());
-  document.getElementById("zoomFit").onclick = () => fitAll();
-
-  // barra de estado: lo que hay bajo el cursor, nivel de zoom y hora
-  const hint = document.getElementById("hint"), hintDefault = hint.textContent;
-  let hintShown = null;
-  function hideHint() {}
-  function statusHover(s) {
-    if (s === hintShown) return; hintShown = s;
-    hint.textContent = s ? `${s.title} — ${s.proj.name} · ${s.messages} mensajes · ${ago(s.lastActive)}` : hintDefault;
-    hint.classList.toggle("on", !!s);
-  }
-  const zoomEl = document.getElementById("zoomLevel"), clockEl = document.getElementById("clock");
-  let zoomShown = -1;
-  setInterval(() => {
-    const z = Math.round(cam.z * 100);
-    if (z !== zoomShown) { zoomShown = z; zoomEl.textContent = `${z} %`; }
-  }, 120);
-  const tickClock = () => { clockEl.textContent = new Intl.DateTimeFormat("es-ES", { weekday: "short", hour: "2-digit", minute: "2-digit" }).format(new Date()); };
-  tickClock(); setInterval(tickClock, 15000);
+  // bandeja del sistema: wifi, volumen, batería y reloj
+  const clockTime = document.getElementById("clockTime"), clockDate = document.getElementById("clockDate");
+  const tickClock = () => {
+    const d = new Date();
+    clockTime.textContent = new Intl.DateTimeFormat("es-ES", { hour: "2-digit", minute: "2-digit" }).format(d);
+    clockDate.textContent = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
+  };
+  tickClock(); setInterval(tickClock, 10000);
+  const wifi = document.getElementById("trayWifi");
+  const net = () => wifi.classList.toggle("off", !navigator.onLine);
+  addEventListener("online", net); addEventListener("offline", net); net();
+  // batería real si el navegador la da (Chrome, Edge); si no, se queda en 100 % cargando
+  const batFill = document.getElementById("batFill"), batBolt = document.getElementById("batBolt"), batPct = document.getElementById("batPct");
+  const showBat = (level, charging) => {
+    const pct = Math.round(level * 100);
+    batPct.textContent = pct + "%";
+    batFill.setAttribute("width", (15.4 * level).toFixed(2));
+    batFill.classList.toggle("low", pct <= 15 && !charging);
+    batBolt.style.display = charging ? "" : "none";
+  };
+  showBat(1, true);
+  if (navigator.getBattery) navigator.getBattery().then(b => {
+    const up = () => showBat(b.level, b.charging);
+    up(); b.addEventListener("levelchange", up); b.addEventListener("chargingchange", up);
+  }).catch(() => {});
 
   // búsqueda
   const search = document.getElementById("search");
@@ -840,27 +857,6 @@
 
   const dotHTML = p => `<span class="dot" style="--cd:${p.cd};--cl:${p.cl}"></span>`;
 
-  // leyenda (se rehace al cambiar de plano)
-  const legend = document.getElementById("legend");
-  function buildLegend(animate) {
-    legend.querySelectorAll("button").forEach(b => b.remove());
-    projList.forEach((p, j) => {
-      const b = document.createElement("button");
-      b.innerHTML = `${dotHTML(p)}<span></span><span class="n">${p.sessions.length}</span>`;
-      b.children[1].textContent = p.name;
-      if (animate) { b.classList.add("in"); b.style.setProperty("--j", j); }
-      b.onmouseenter = () => { hoverProject = p; };
-      b.onmouseleave = () => { hoverProject = null; };
-      b.onfocus = b.onmouseenter; b.onblur = b.onmouseleave;
-      b.onclick = () => { closePanel(); flyTo(p.x, p.y, clamp(Math.min(W, H) / (p.radius * 3.2), 0.6, 3)); };
-      legend.appendChild(b);
-    });
-    const ask = P.kind === "ask";
-    document.getElementById("stats").textContent =
-      `${SESSIONS.length} ${ask ? "chats" : "sesiones"} · ${projList.length} proyectos · ${links.length} hilos`;
-  }
-  buildLegend(false);
-
   // ── planos: Code delante, Ask detrás (o al revés) ────────────
   const planeTabs = document.getElementById("planes");
   const planeInd = planeTabs.querySelector(".planes-ind");
@@ -870,7 +866,6 @@
     planeInd.style.width = b.offsetWidth + "px";
     planeInd.style.translate = b.offsetLeft + "px 0";
   }
-  let legendTimer = 0;
   function switchPlane(kind) {
     const next = PLANES[kind];
     if (!next || next === P) return false;
@@ -895,9 +890,6 @@
     search.placeholder = ask ? "Buscar chats" : "Buscar sesiones";
     search.setAttribute("aria-label", search.placeholder);
     $("newSession").querySelector("span").textContent = ask ? "Nuevo chat" : "Nueva sesión";
-    clearTimeout(legendTimer);
-    if (reduced()) buildLegend(false);
-    else { legend.classList.add("swap"); legendTimer = setTimeout(() => { buildLegend(true); legend.classList.remove("swap"); }, 220); }
     return true;
   }
   planeTabs.querySelectorAll("[data-plane]").forEach(b => b.addEventListener("click", () => switchPlane(b.dataset.plane)));
@@ -1190,8 +1182,9 @@
     // la cámara se zambulle en la estrella, su luz llena la pantalla y la sesión surge de ella
     camBefore = { x: cam.x, y: cam.y, z: cam.z };
     const from = s && motion ? labelBox(s, cam) : null;
-    if (s) flyTo(s.x, s.y, Math.min(ZMAX, Math.max(cam.z, 1.5) * 2.4), { dur: 900, noPanel: true, noDip: true });
+    if (s) flyTo(s.x, s.y, Math.min(ZMAX, Math.max(cam.z, 1.5) * 2.4), { dur: 760, noPanel: true, noDip: true, ease: easeOutCubic });
     if (s && motion) dive = { s, t0: performance.now(), dur: 820, dir: 1 };
+    document.body.classList.toggle("diving", !!s);
 
     sessionEl.classList.remove("closing");
     sessionEl.classList.add("open"); sessionEl.setAttribute("aria-hidden", "false");
@@ -1230,6 +1223,7 @@
     let [x, y] = s ? toScreen(s.x, s.y) : [W / 2, H / 2];
     if (!s) { const b = $("newSession").getBoundingClientRect(); x = b.left + b.width / 2; y = b.top + b.height / 2; }
     sessionEl.classList.remove("open", "entering"); sessionEl.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("diving");
     document.body.classList.remove("session-open");
     if (camBefore && s) flyTo(camBefore.x, camBefore.y, camBefore.z, { dur: 900, noPanel: true, noDip: true, ease: easeOutQuart });
     if (sAnim) { sAnim.cancel(); sAnim = null; }

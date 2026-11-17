@@ -13,7 +13,7 @@
   --t-med: .35s;
   --r: 6px;
   --bar-h: 40px;
-  --status-h: 28px;
+  --status-h: 34px;
   --panel-w: 360px;
   --mon-w: 280px;
 }
@@ -167,35 +167,23 @@ kbd { font-family: var(--font); font-size: 10px; color: var(--muted); border: 1p
 /* ── barra de estado ────────────────────────────────────────── */
 .statusbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; height: calc(var(--status-h) + env(safe-area-inset-bottom, 0px));
-  display: flex; align-items: center; gap: 18px;
-  padding: 0 max(8px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(14px, env(safe-area-inset-left, 0px));
-  background: var(--chrome); border-top: 1px solid var(--line); color: var(--muted); font-size: 10.5px;
+  display: flex; align-items: center; justify-content: flex-end;
+  padding: 0 max(12px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(14px, env(safe-area-inset-left, 0px));
+  background: var(--chrome); border-top: 1px solid var(--line); color: var(--ink-2); font-size: 11px;
 }
-.sb-item { white-space: nowrap; }
-.sb-hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--faint); transition: color var(--t-fast); }
-.sb-hint.on { color: var(--ink-2); }
-.sb-right { display: flex; align-items: center; gap: 2px; }
-.sb-right .sb-item { padding: 0 8px; }
-#clock { border-left: 1px solid var(--line); margin-left: 6px; padding-left: 12px; }
-
-/* ── leyenda de proyectos ───────────────────────────────────── */
-.legend {
-  position: fixed; left: 10px; bottom: calc(var(--status-h) + 10px); z-index: 4;
-  display: flex; flex-direction: column; max-height: calc(100vh - var(--bar-h) - var(--status-h) - 40px); overflow: auto;
-  font-size: 11.5px;
-}
-.legend-h { color: var(--faint); font-size: 10.5px; padding: 0 6px 6px; }
-.legend button {
-  display: flex; align-items: center; gap: 9px; padding: 4px 6px; border-radius: 4px; text-align: left;
-  color: var(--muted); min-width: 210px;
-  transition: color var(--t-fast), background-color var(--t-fast);
-}
-.legend button:hover, .legend button:focus-visible { color: var(--ink); background: var(--hover); }
-.legend button { transition: color var(--t-fast), background-color var(--t-fast), opacity .2s var(--ease-in), translate .2s var(--ease-in); }
-.legend.swap button { opacity: 0; translate: -6px 0; }
-.legend button.in { animation: legendIn .5s var(--ease-out) backwards; animation-delay: calc(var(--j, 0) * 35ms); }
-@keyframes legendIn { from { opacity: 0; translate: 0 6px; } }
-.legend .n { color: var(--faint); margin-left: auto; padding-left: 16px; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+/* bandeja: wifi, volumen, batería y reloj */
+.tray { display: flex; align-items: center; gap: 12px; height: 100%; }
+.tray-ico { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
+.tray-ico circle { fill: currentColor; stroke: none; }
+#trayWifi.off { opacity: .35; }
+.tray-bat { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.bat { width: 22px; height: 12px; }
+.bat-body { fill: none; stroke: currentColor; stroke-width: 1.2; }
+.bat-cap { fill: currentColor; }
+.bat-fill { fill: var(--ok); transition: width .6s var(--ease-out); }
+.bat-fill.low { fill: var(--crit); }
+.bat-bolt { fill: var(--chrome); stroke: var(--ok); stroke-width: .6; stroke-linejoin: round; }
+.tray-clock { display: grid; justify-items: end; line-height: 1.25; font-size: 10.5px; font-variant-numeric: tabular-nums; padding-left: 6px; }
 
 .dot { --c: var(--cd); width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--c); }
 :root[data-theme="light"] .dot { --c: var(--cl); }
@@ -209,6 +197,8 @@ kbd { font-family: var(--font); font-size: 10px; color: var(--muted); border: 1p
   transition: translate .3s var(--ease-in), visibility 0s linear .3s;
 }
 .panel.open { translate: 0 0; visibility: visible; transition: translate .45s var(--ease-out), visibility 0s; }
+/* al zambullirse en una estrella el inspector se aparta, para que el salto quede centrado en la pantalla */
+body.diving .panel.open { translate: 100% 0; transition: translate .32s var(--ease-in); }
 .panel-bar {
   display: flex; align-items: center; justify-content: space-between; height: 32px; flex: none;
   padding: 0 6px 0 16px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10.5px;
@@ -505,8 +495,6 @@ kbd { font-family: var(--font); font-size: 10px; color: var(--muted); border: 1p
   .titlebar { grid-template-columns: auto 1fr auto; gap: 10px; }
   #newSession span { display: none; }
   #newSession { width: 28px; padding: 0; }
-  .legend { display: none; }
-  .sb-hint, #clock { display: none; }
   #stats { flex: 1; overflow: hidden; text-overflow: ellipsis; }
   .panel { top: auto; height: min(70vh, 560px); border-left: 0; border-top: 1px solid var(--line); translate: 0 100%; box-shadow: var(--shadow); }
   .s-tools { display: none; }

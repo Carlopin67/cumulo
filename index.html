@@ -54,21 +54,17 @@
     </div>
   </header>
 
-  <nav id="legend" class="legend chrome" style="--i:1" aria-label="Proyectos">
-    <p class="legend-h">Proyectos</p>
-  </nav>
-
-  <!-- barra de estado inferior -->
+  <!-- barra inferior: solo la bandeja del sistema (como la de Windows) -->
   <footer class="statusbar chrome" style="--i:2">
-    <span id="stats" class="sb-item"></span>
-    <span id="hint" class="sb-item sb-hint">Arrastra para moverte · rueda para acercar · clic en una estrella para abrirla</span>
-    <span class="sb-right">
-      <span id="zoomLevel" class="sb-item num">100 %</span>
-      <button id="zoomOut" class="sb-btn" aria-label="Alejar"><svg class="ico" viewBox="0 0 16 16"><path d="M4 8h8"/></svg></button>
-      <button id="zoomIn" class="sb-btn" aria-label="Acercar"><svg class="ico" viewBox="0 0 16 16"><path d="M8 4v8M4 8h8"/></svg></button>
-      <button id="zoomFit" class="sb-btn" aria-label="Ver todo"><svg class="ico" viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button>
-      <span id="clock" class="sb-item num"></span>
-    </span>
+    <div class="tray" aria-label="Estado del equipo">
+      <svg id="trayWifi" class="tray-ico" viewBox="0 0 16 16" aria-label="Wi-Fi"><path d="M1.5 6.2a9.5 9.5 0 0 1 13 0M3.7 8.6a6.3 6.3 0 0 1 8.6 0M5.9 11a3.1 3.1 0 0 1 4.2 0"/><circle cx="8" cy="13.2" r=".9"/></svg>
+      <svg class="tray-ico" viewBox="0 0 16 16" aria-label="Volumen"><path d="M2.5 6h2.2L8 3.3v9.4L4.7 10H2.5z"/><path d="M10.5 5.6a3.3 3.3 0 0 1 0 4.8M12.3 3.9a5.7 5.7 0 0 1 0 8.2"/></svg>
+      <span class="tray-bat" title="Batería">
+        <svg class="bat" viewBox="0 0 22 12" aria-hidden="true"><rect class="bat-body" x=".75" y=".75" width="18.5" height="10.5" rx="2"/><rect class="bat-cap" x="19.9" y="4" width="1.6" height="4" rx=".6"/><rect id="batFill" class="bat-fill" x="2.3" y="2.3" width="15.4" height="7.4" rx="1"/><path id="batBolt" class="bat-bolt" d="M11.2 2.6 8.2 6.4h2.4l-.6 3 3-3.9h-2.4z"/></svg>
+        <span id="batPct">100%</span>
+      </span>
+      <span class="tray-clock"><span id="clockTime"></span><span id="clockDate"></span></span>
+    </div>
   </footer>
 
   <!-- inspector de la sesión seleccionada, acoplado a la derecha -->
