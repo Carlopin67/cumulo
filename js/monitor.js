@@ -248,8 +248,7 @@
   const limitsEl = document.getElementById("monLimits");
   document.getElementById("limSub").textContent = window.CUMULO_LIMITS ? "" : "simulado";
   // Diseño «órbitas»: cada límite es una órbita alrededor de una estrella.
-  // El arco iluminado es lo gastado; el planeta marca cuánto tiempo de la ventana ha pasado.
-  // Si el arco adelanta al planeta, se está gastando más rápido de lo que pasa el tiempo.
+  // El arco iluminado es lo gastado y la bolita marca hasta dónde llega; un punto cada 20 %.
   const LIMITS = [
     { k: "weekly", label: "Semanal", ring: 1, step: 86400e3 },
     { k: "session", label: "5 horas", ring: 0.6, step: 3600e3 },
@@ -259,7 +258,7 @@
       <canvas class="orbit-cv" aria-hidden="true"></canvas>
       <div class="orbit-info"></div>
     </div>
-    <p class="orbit-key"><span class="k-arc"></span>gastado <span class="k-dot"></span>tiempo pasado</p>`;
+    <p class="orbit-key"><span class="k-arc"></span>gastado <span class="k-tick"></span>cada punto, 20 %</p>`;
   const orbitCv = limitsEl.querySelector(".orbit-cv"), info = limitsEl.querySelector(".orbit-info");
   LIMITS.forEach(L => {
     const d = document.createElement("div"); d.className = "oi";
@@ -267,7 +266,7 @@
       <p class="oi-sub"></p><p class="oi-proj"></p>`;
     d.querySelector(".oi-name").textContent = L.label;
     L.el = d; L.b = d.querySelector("b"); L.reset = d.querySelector(".oi-sub"); L.proj = d.querySelector(".oi-proj");
-    L.shown = 0; L.shownT = 0;
+    L.shown = 0;
     info.appendChild(d);
   });
 
@@ -317,21 +316,16 @@
       const l = limits[L.k]; if (!l) continue;
       const r = R * L.ring;
       L.shown += (l.used - L.shown) * k;          // el arco crece suave al abrir
-      L.shownT += ((L.elapsed || 0) - L.shownT) * k;
       const col = colorFor(L.level || "");
 
-      // órbita y marcas (horas o días)
+      // órbita y un punto cada 20 % (el de arriba es el 0 % / 100 %)
       g.strokeStyle = ink(light ? 0.13 : 0.16); g.lineWidth = 1;
       g.beginPath(); g.arc(cx, cy, r, 0, TAU); g.stroke();
-      const n = Math.round((l.end - l.start) / L.step);
-      g.fillStyle = ink(light ? 0.3 : 0.32);
-      for (let i = 0; i < n; i++) {
-        const a = TOP + i / n * TAU;
-        g.beginPath(); g.arc(cx + Math.cos(a) * r, cy + Math.sin(a) * r, i === 0 ? 0 : 0.9, 0, TAU); g.fill();
+      for (let i = 0; i < 5; i++) {
+        const a = TOP + i / 5 * TAU, done = L.shown >= i / 5;
+        g.fillStyle = ink(done ? (light ? 0.55 : 0.6) : (light ? 0.28 : 0.3));
+        g.beginPath(); g.arc(cx + Math.cos(a) * r, cy + Math.sin(a) * r, i === 0 ? 1.6 : 1.3, 0, TAU); g.fill();
       }
-      // reinicio (arriba)
-      g.strokeStyle = ink(light ? 0.45 : 0.5); g.lineWidth = 1.2;
-      g.beginPath(); g.moveTo(cx, cy - r - 4); g.lineTo(cx, cy - r + 4); g.stroke();
 
       // arco gastado con halo
       const a1 = TOP + clamp(L.shown, 0, 1) * TAU;
@@ -343,8 +337,8 @@
         g.beginPath(); g.arc(cx, cy, r, TOP, a1); g.stroke();
       }
 
-      // planeta: tiempo pasado de la ventana
-      const ap = TOP + clamp(L.shownT, 0, 1) * TAU;
+      // bolita al final del arco: por dónde va el límite
+      const ap = a1;
       const px = cx + Math.cos(ap) * r, py = cy + Math.sin(ap) * r;
       const glow = g.createRadialGradient(px, py, 0, px, py, 10);
       glow.addColorStop(0, ink((light ? 0.16 : 0.35) + 0.08 * Math.sin(t * 2 + L.ring * 3))); glow.addColorStop(1, ink(0));
