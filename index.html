@@ -153,6 +153,13 @@
       </div>
 
       <aside id="monitor" class="monitor" aria-label="Monitor del sistema">
+        <!-- app instalable: modelo y esfuerzo de la sesión, sin escribir comandos -->
+        <section id="claudeBox" class="claude-box" aria-label="Modelo y esfuerzo">
+          <p class="lim-h"><span class="mon-name">Claude</span><span id="cbSub" class="mon-sub"></span></p>
+          <div class="cb-row"><span class="cb-lbl">Modelo</span><div id="cbModel" class="seg" role="radiogroup" aria-label="Modelo"></div></div>
+          <div class="cb-row"><span class="cb-lbl">Esfuerzo</span><div id="cbEffort" class="seg" role="radiogroup" aria-label="Esfuerzo"></div></div>
+          <p id="cbTip" class="cb-tip"></p>
+        </section>
         <button id="monToggle" class="mon-head" aria-expanded="true" aria-controls="monRows">
           <span class="live" aria-hidden="true"></span>
           <span class="mon-name">Sistema</span>

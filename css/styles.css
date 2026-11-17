@@ -722,3 +722,19 @@ html:not(.fullscreen) .win-ctl .fs-in { display: inline; }
 .app-item .x .ico { width: 10px; height: 10px; }
 .app-item:hover .x { display: grid; place-items: center; }
 .app-item .x:hover { color: var(--crit); }
+/* modelo y esfuerzo (solo en sesiones reales de Claude) */
+.claude-box { display: none; padding: 4px 2px 14px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
+html.desktop .session.real:not(.shell) .claude-box { display: block; }
+.claude-box .lim-h { margin-bottom: 10px; }
+.cb-row { display: grid; gap: 6px; margin-bottom: 10px; }
+.cb-lbl { font-size: 10px; color: var(--faint); }
+.seg { display: flex; padding: 2px; gap: 2px; background: var(--field); border: 1px solid var(--line); border-radius: 6px; }
+.seg button { flex: 1 1 0; min-width: 0; height: 24px; padding: 0 4px; border-radius: 4px; font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color var(--t-fast), background var(--t-fast); }
+.seg button:hover:not(:disabled) { color: var(--ink); }
+.seg button[aria-checked="true"] { color: var(--ink); background: var(--bg); box-shadow: 0 0 0 1px var(--line-2); }
+.seg button[aria-checked="true"]::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 5px; border-radius: 50%; background: var(--accent); vertical-align: 1px; }
+.seg button:disabled { opacity: .45; cursor: var(--cur); }
+.seg.pending button[aria-checked="true"]::before { background: var(--muted); }
+.cb-tip { font-size: 10.5px; line-height: 1.5; color: var(--muted); }
+.cb-tip b { font-weight: 500; color: var(--ok); }
+.cb-tip.warn b { color: var(--warn); } .cb-tip.crit b { color: var(--crit); }

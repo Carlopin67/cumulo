@@ -135,8 +135,64 @@
       if (prev !== L.status) emit(t, L.status === "busy" ? "working" : L.status === "idle" ? (prev === "busy" ? "done" : "idle") : "ask");
       const c = v.context && t.sessionId && v.context[t.sessionId];
       if (c && t === active && window.cumuloMonitor && window.cumuloMonitor.setContext) window.cumuloMonitor.setContext(c.tokens);
+      if (t === active) claudeBox(t, c, L.status);
     });
   });
+
+  // ── modelo y esfuerzo de la sesión abierta (en vez de escribir /model y /effort) ──
+  const MODELS = [
+    { id: "claude-opus-5-5", name: "Opus", rx: /opus/i },
+    { id: "claude-sonnet-5-5", name: "Sonnet", rx: /sonnet/i },
+    { id: "claude-haiku-5-5", name: "Haiku", rx: /haiku/i },
+    { id: "claude-fable-5-2", name: "Fable", rx: /fable/i },
+  ];
+  const EFFORTS = [["low", "Bajo"], ["medium", "Medio"], ["high", "Alto"], ["xhigh", "Muy alto"], ["max", "Máximo"]];
+  const cbModel = document.getElementById("cbModel"), cbEffort = document.getElementById("cbEffort");
+  const cbTip = document.getElementById("cbTip"), cbSub = document.getElementById("cbSub");
+  const fmtK = n => n >= 1e6 ? (n / 1e6).toFixed(2).replace(".", ",") + " M" : n >= 1e3 ? Math.round(n / 1e3) + " mil" : String(n);
+  let wanted = null; // lo que acabas de elegir, hasta que Claude lo confirme
+  function segButtons(box, items, kind) {
+    box.innerHTML = "";
+    items.forEach(([val, label, title]) => {
+      const b = document.createElement("button"); b.type = "button"; b.role = "radio"; b.dataset.v = val; b.textContent = label;
+      if (title) b.title = title;
+      b.setAttribute("aria-checked", "false");
+      b.onclick = () => choose(kind, val);
+      box.append(b);
+    });
+  }
+  segButtons(cbModel, MODELS.map(m => [m.id, m.name, m.id]), "model");
+  segButtons(cbEffort, EFFORTS.map(([v, l]) => [v, l, `/effort ${v}`]), "effort");
+  function mark(box, val) { [...box.children].forEach(b => b.setAttribute("aria-checked", String(b.dataset.v === val))); }
+  function choose(kind, val) {
+    if (!active || active.exited) return;
+    if (active.busy) { cbSub.textContent = "espera a que termine"; return; }
+    D.term.write(active.key, kind === "model" ? `/model ${val}\r` : `/effort ${val}\r`);
+    wanted = { kind, val, at: Date.now() };
+    mark(kind === "model" ? cbModel : cbEffort, val);
+    (kind === "model" ? cbModel : cbEffort).classList.add("pending");
+    active.xt.focus();
+  }
+  function claudeBox(t, c, status) {
+    t.busy = status === "busy";
+    [...cbModel.children, ...cbEffort.children].forEach(b => { b.disabled = t.busy; });
+    cbSub.textContent = t.busy ? "trabajando…" : "";
+    if (c) {
+      const m = MODELS.find(x => x.rx.test(c.model || c.modelName || ""));
+      const fresh = wanted && Date.now() - wanted.at < 8000;
+      if (!(fresh && wanted.kind === "model") && m) { mark(cbModel, m.id); cbModel.classList.remove("pending"); }
+      if (!(fresh && wanted.kind === "effort") && c.effort) { mark(cbEffort, c.effort); cbEffort.classList.remove("pending"); }
+      if (fresh && wanted.kind === "model" && m && m.id === wanted.val) cbModel.classList.remove("pending");
+      if (fresh && wanted.kind === "effort" && c.effort === wanted.val) cbEffort.classList.remove("pending");
+      const n = c.tokens || 0;
+      cbTip.className = "cb-tip" + (n >= 400000 ? " crit" : n >= 150000 ? " warn" : "");
+      cbTip.innerHTML = n >= 400000
+        ? `<b>Empieza un chat nuevo.</b> Cada mensaje relee ${fmtK(n)} fichas y gasta mucho plan.`
+        : n >= 150000
+        ? `<b>Chat largo.</b> Si cambias de tema, mejor uno nuevo o «Compactar».`
+        : `<b>Chat ligero.</b> Puedes seguir en este sin problema.`;
+    } else cbTip.textContent = "Se completa al primer mensaje de Claude.";
+  }
 
   window.cumuloTerm = {
     async show(key, opts) {

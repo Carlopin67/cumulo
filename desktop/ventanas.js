@@ -28,8 +28,12 @@ public class W {
   [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out int v, int s);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern bool SystemParametersInfo(uint a, uint b, ref RECT r, uint f);
 }
 '@
+[void][W]::SetProcessDPIAware()   # medidas reales de la pantalla (con zoom del 125 % también)
 while ($true) {
   $line = [Console]::In.ReadLine(); if ($line -eq $null) { break }
   $p = $line.Split(' ', 3); $cmd = $p[0]
@@ -56,6 +60,10 @@ while ($true) {
       [W]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [W]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero) # Alt: permite traer la ventana delante
       [void][W]::SetForegroundWindow($h); [Console]::Out.WriteLine('ok')
     } elseif ($cmd -eq 'min') { [void][W]::ShowWindowAsync([IntPtr][Int64]$p[1], 6); [Console]::Out.WriteLine('ok')
+    } elseif ($cmd -eq 'workarea') {
+      # zona de trabajo: lo que pueden ocupar las ventanas maximizadas (deja libre la barra de abajo)
+      $v = $p[1].Split(','); $r = New-Object W+RECT; $r.L = [int]$v[0]; $r.T = [int]$v[1]; $r.R = [int]$v[2]; $r.B = [int]$v[3]
+      [void][W]::SystemParametersInfo(0x2F, 0, [ref]$r, 3); [Console]::Out.WriteLine('ok')
     } elseif ($cmd -eq 'close') { [void][W]::PostMessage([IntPtr][Int64]$p[1], 0x10, [IntPtr]::Zero, [IntPtr]::Zero); [Console]::Out.WriteLine('ok')
     } else { [Console]::Out.WriteLine('?') }
   } catch { [Console]::Out.WriteLine('[]') }
@@ -162,6 +170,7 @@ function shellSet(exe, dir) {
 }
 
 module.exports = {
+  workArea: (l, t, r, b, dir) => ask(`workarea ${l},${t},${r},${b}`, dir),
   list, focus: (h, dir) => ask(`focus ${h}`, dir), minimize: (h, dir) => ask(`min ${h}`, dir), close: (h, dir) => ask(`close ${h}`, dir),
   runStartup, shellGet, shellSet, stop: () => { if (ps) ps.kill(); },
 };

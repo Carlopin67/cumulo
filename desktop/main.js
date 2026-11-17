@@ -29,7 +29,7 @@ const CFG_FILE = () => path.join(app.getPath("userData"), "ajustes.json");
 if (process.env.CUMULO_DEV) app.setPath("userData", app.getPath("userData") + "-dev");
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
 
-let win = null, tray = null;
+let win = null, tray = null, bar = null;
 let cfg = { autostart: false, shortcut: "Alt+Space" };
 try { cfg = { ...cfg, ...JSON.parse(fs.readFileSync(CFG_FILE(), "utf8")) }; } catch { /* primera vez */ }
 const saveCfg = () => { try { fs.writeFileSync(CFG_FILE(), JSON.stringify(cfg, null, 2)); } catch { /* sin permiso */ } };
@@ -45,13 +45,14 @@ const CLAUDE = findClaude();
 // ── terminales ─────────────────────────────────────────────────
 // entorno limpio: si Cúmulo se abrió desde otra sesión de Claude, sus marcas no deben heredarse
 function cleanEnv() {
-  const env = { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", FORCE_COLOR: "3" };
+  const env = { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", FORCE_COLOR: "3", CUMULO_TERM: "1" };
   for (const k of Object.keys(env)) if (/^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_AGENT|CLAUDE_PLUGIN_ROOT|ELECTRON_RUN_AS_NODE)/.test(k)) delete env[k];
   delete env.ELECTRON_NO_ATTACH_CONSOLE;
   return env;
 }
 const terms = new Map(); // key → { p, key, sessionId }
 function send(ch, ...a) { if (win && !win.isDestroyed()) win.webContents.send(ch, ...a); }
+function sendBar(ch, ...a) { if (bar && !bar.isDestroyed() && bar.isVisible()) bar.webContents.send(ch, ...a); }
 
 ipcMain.handle("term:open", (_e, { key, sessionId, cwd, cols, rows, shellOnly }) => {
   const t = terms.get(key);
@@ -98,7 +99,11 @@ function readLive() {
   return { live: out, limits: estado.limits || null, context: estado.context || {} };
 }
 ipcMain.on("live:sync", e => { e.returnValue = readLive(); });
-setInterval(() => { if (win && win.isVisible() && !win.isMinimized()) send("live", readLive()); }, 2500);
+setInterval(() => {
+  const toWin = win && win.isVisible() && !win.isMinimized(), toBar = bar && bar.isVisible();
+  if (!toWin && !toBar) return;
+  const v = readLive(); if (toWin) send("live", v); if (toBar) sendBar("live", v);
+}, 2500);
 
 // ── monitor del sistema ────────────────────────────────────────
 // Ligero a propósito: CPU y RAM salen de Node (sin procesos); la gráfica, la red y Claude se leen
@@ -350,6 +355,36 @@ function createTray() {
 }
 
 app.on("second-instance", () => { if (win) { win.show(); win.focus(); } });
+// ── barra de tareas siempre visible (solo como escritorio) ──────
+// Las apps maximizadas (Chrome…) ocupaban toda la pantalla y tapaban la barra de Cúmulo. Se reserva una franja
+// abajo (zona de trabajo de Windows) y ahí vive esta barra, encima de todo, mientras otra app está delante.
+const BAR_H = 28;
+function placeBar() {
+  if (!bar) return;
+  const d = screen.getPrimaryDisplay(), b = d.bounds;
+  bar.setBounds({ x: b.x, y: b.y + b.height - BAR_H, width: b.width, height: BAR_H });
+  const wa = screen.dipToScreenRect(null, { x: b.x, y: b.y, width: b.width, height: b.height - BAR_H });
+  ventanas.workArea(wa.x, wa.y, wa.x + wa.width, wa.y + wa.height, app.getPath("userData")).catch(() => {});
+}
+function syncBar() {
+  if (!bar || bar.isDestroyed()) return;
+  const front = win && win.isVisible() && !win.isMinimized() && win.isFocused();
+  if (front) bar.hide(); else if (!bar.isVisible()) { bar.showInactive(); bar.setAlwaysOnTop(true, "screen-saver"); }
+}
+function createBar() {
+  bar = new BrowserWindow({
+    frame: false, resizable: false, movable: false, minimizable: false, maximizable: false, fullscreenable: false,
+    skipTaskbar: true, alwaysOnTop: true, focusable: false, show: false, backgroundColor: "#0b0b0d",
+    webPreferences: { preload: path.join(__dirname, "preload-barra.js"), contextIsolation: true, sandbox: false, spellcheck: false },
+  });
+  bar.setAlwaysOnTop(true, "screen-saver");
+  bar.loadFile(path.join(WEB, "barra.html"));
+  bar.once("ready-to-show", () => { placeBar(); syncBar(); });
+  screen.on("display-metrics-changed", placeBar);
+  ["focus", "blur", "minimize", "restore", "hide", "show"].forEach(ev => win.on(ev, () => setTimeout(syncBar, 30)));
+}
+ipcMain.on("bar:cumulo", () => bringFront());
+
 // traer Cúmulo delante aunque otra app tenga el foco (Windows no deja robarlo sin este truco)
 function bringFront() {
   if (!win) return;
@@ -358,14 +393,15 @@ function bringFront() {
   setTimeout(() => { if (win) win.setAlwaysOnTop(false); }, 400);
 }
 app.whenReady().then(async () => {
-  if (SHELL) ventanas.runStartup(log).catch(() => {});
+  if (SHELL && !process.env.CUMULO_DEV) ventanas.runStartup(log).catch(() => {});
   // tecla Windows: abre o cierra el lanzador (como el menú Inicio)
-  if (SHELL) teclawin.start(app.getPath("userData"), () => {
+  if (SHELL && !process.env.CUMULO_DEV) teclawin.start(app.getPath("userData"), () => {
     if (!win) return;
     const front = win.isVisible() && !win.isMinimized() && win.isFocused();
     if (!front) { bringFront(); send("palette"); } else send("palette:toggle");
   });
   createWindow();
+  if (SHELL) createBar();
   createTray();
   registerShortcut();
   await sysInit().catch(() => {});
