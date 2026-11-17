@@ -46,19 +46,9 @@
     </button>
   </div>
 
-  <aside id="monitor" class="monitor chrome" style="--i:2" aria-label="Monitor del sistema">
-    <button id="monToggle" class="mon-head" aria-expanded="false" aria-controls="monRows">
-      <span class="live" aria-hidden="true"></span>
-      <span class="mon-name">Sistema</span>
-      <span id="monSub" class="mon-sub mono"></span>
-      <svg class="ico chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
-    </button>
-    <div id="monRows" class="mon-rows"></div>
-  </aside>
+  <nav id="legend" class="legend chrome" style="--i:2" aria-label="Proyectos"></nav>
 
-  <nav id="legend" class="legend chrome" style="--i:3" aria-label="Proyectos"></nav>
-
-  <div class="zoom chrome" style="--i:4">
+  <div class="zoom chrome" style="--i:3">
     <button id="zoomIn" class="btn icon" aria-label="Acercar"><svg class="ico" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg></button>
     <button id="zoomOut" class="btn icon" aria-label="Alejar"><svg class="ico" viewBox="0 0 16 16"><path d="M3 8h10"/></svg></button>
     <button id="zoomFit" class="btn icon" aria-label="Ver todo"><svg class="ico" viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button>
@@ -107,6 +97,15 @@
         <button id="sCopy" class="btn swap-label"><span>Copiar orden</span></button>
       </div>
     </header>
+    <aside id="monitor" class="monitor s-reveal" style="--i:2" aria-label="Monitor del sistema">
+      <button id="monToggle" class="mon-head" aria-expanded="false" aria-controls="monRows">
+        <span class="live" aria-hidden="true"></span>
+        <span class="mon-name">Sistema</span>
+        <span id="monSub" class="mon-sub mono"></span>
+        <svg class="ico chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+      </button>
+      <div id="monRows" class="mon-rows"></div>
+    </aside>
     <div id="sScroll" class="s-term">
       <p id="sMeta" class="mono s-meta s-reveal" style="--i:0"></p>
       <pre id="sLog" class="mono s-log s-reveal" style="--i:1"></pre>
