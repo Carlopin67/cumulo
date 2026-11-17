@@ -34,7 +34,10 @@
   const X = D.xtermDir;
   const ready = Promise.all([
     load("link", { rel: "stylesheet", href: `${X}/xterm/css/xterm.css` }),
-    load("script", { src: `${X}/xterm/lib/xterm.js` }).then(() => load("script", { src: `${X}/addon-fit/lib/addon-fit.js` })),
+    load("script", { src: `${X}/xterm/lib/xterm.js` }).then(() => Promise.all([
+      load("script", { src: `${X}/addon-fit/lib/addon-fit.js` }),
+      load("script", { src: `${X}/addon-webgl/lib/addon-webgl.js` }).catch(() => {}),
+    ])),
   ]);
 
   // ── terminales ───────────────────────────────────────────────
@@ -74,6 +77,9 @@
     });
     const fit = new window.FitAddon.FitAddon();
     xt.loadAddon(fit); xt.open(el);
+    if (window.WebglAddon) {
+      try { const gl = new window.WebglAddon.WebglAddon(); gl.onContextLoss(() => gl.dispose()); xt.loadAddon(gl); } catch { /* sin WebGL: se queda el normal */ }
+    }
     const t = { key, xt, fit, el, pid: 0, sessionId: opts.sessionId || null, exited: false, opts };
     terms.set(key, t);
     // copiar con selección, pegar texto; si el portapapeles solo tiene una imagen, Claude la lee con Alt+V

@@ -1,7 +1,7 @@
 {
   "name": "cumulo",
   "productName": "Cúmulo",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Lanzador de sesiones de Claude Code como cúmulo de estrellas",
   "main": "main.js",
   "private": true,
@@ -17,6 +17,7 @@
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.18",
     "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
     "systeminformation": "^5.33.23"
   },
@@ -32,6 +33,7 @@
       "preload.js",
       "sesiones.js",
       "ventanas.js",
+      "contadores.js",
       "icono.png",
       "node_modules/**/*",
       {

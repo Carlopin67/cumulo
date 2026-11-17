@@ -449,7 +449,7 @@ body.returning .panel.open { transition: translate .95s cubic-bezier(.45, 0, .55
 }
 .mon-head:hover { color: var(--ink); }
 .mon-name { font-weight: 500; }
-.mon-head .live { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); animation: live 2.4s var(--ease-out) infinite; }
+.mon-head .live { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
 @keyframes live { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 50%, transparent); } 70%, 100% { box-shadow: 0 0 0 6px transparent; } }
 .mon-sub { color: var(--faint); }
 .mon-head .chev { margin-left: auto; width: 12px; height: 12px; transition: rotate var(--t-med) var(--ease-out); }

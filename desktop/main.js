@@ -10,6 +10,7 @@ const pty = require("@lydell/node-pty");
 const si = require("systeminformation");
 const sesiones = require("./sesiones");
 const ventanas = require("./ventanas");
+const contadores = require("./contadores");
 
 // --shell: Cúmulo hace de escritorio de Windows (lo arranca Windows en lugar del explorador)
 const SHELL = process.argv.includes("--shell");
@@ -146,12 +147,14 @@ function sysTick() {
   if (!sysStatic) return;
   const total = os.totalmem(), free = os.freemem();
   const g = gpu || { used: 0, total: 1, gpuUsage: 0, temp: 0 };
+  const c = contadores.read(); // los del Administrador de tareas (si ya han llegado)
+  const cpu = cpuUsage();
   sys = {
-    cpu: { usage: cpuUsage(), cores: sysStatic.cores, ghz: sysStatic.ghz, temp: 0 },
+    cpu: { usage: c ? Math.min(100, c.cpu) : cpu, cores: sysStatic.cores, ghz: sysStatic.ghz, temp: 0 },
     ram: { used: (total - free) / 1e9, total: total / 1e9 },
-    vram: g,
-    disk: { used: sysStatic.disk.used / 1e9, total: sysStatic.disk.size / 1e9, read: 0, write: 0 },
-    net,
+    vram: c ? { used: c.vram / 1073741824, total: g.total || 1, gpuUsage: Math.min(100, c.gpu), temp: g.temp } : g,
+    disk: { used: sysStatic.disk.used / 1e9, total: sysStatic.disk.size / 1e9, read: c ? c.rd / 1e6 : 0, write: c ? c.wr / 1e6 : 0 },
+    net: c ? { down: c.down / 1e6, up: c.up / 1e6 } : net,
     claude: claudeProc,
   };
   send("sys", sys);
@@ -165,13 +168,14 @@ function claudeTick() {
     claudeProc = { processes: rows.length, memory: kb / 1e6 };
   });
 }
-ipcMain.on("monitor:active", (_e, v) => { monitorOn = !!v; });
+ipcMain.on("monitor:active", (_e, v) => { monitorOn = !!v; contadores.setActive(monitorOn, app.getPath("userData")); });
 let tickN = 0;
 function monitorLoop() {
   tickN++;
   if (!monitorOn || !win || !win.isVisible() || win.isMinimized()) return; // nadie lo mira: no se gasta nada
   sysTick();
-  if (tickN % 3 === 0) { gpuTick(); netTick(); }
+  if (tickN % 15 === 0) gpuTick(); // solo para la memoria total y la temperatura de la NVIDIA
+  if (tickN % 3 === 0 && !contadores.read()) netTick();
   if (tickN % 6 === 0) claudeTick();
   if (tickN % 120 === 0) diskTick();
 }
@@ -354,5 +358,5 @@ app.whenReady().then(async () => {
   sysTick(); claudeTick(); gpuTick(); netTick();
   setInterval(monitorLoop, 1000);
 });
-app.on("will-quit", () => { ventanas.stop(); globalShortcut.unregisterAll(); for (const t of terms.values()) { try { t.p.kill(); } catch { /* ya cerrado */ } } });
+app.on("will-quit", () => { ventanas.stop(); contadores.stop(); globalShortcut.unregisterAll(); for (const t of terms.values()) { try { t.p.kill(); } catch { /* ya cerrado */ } } });
 app.on("window-all-closed", () => { /* sigue en la bandeja */ });

@@ -491,7 +491,7 @@
   let last = 0, lastDraw = 0;
   function loop(now) {
     requestAnimationFrame(loop);
-    if (now - lastDraw < (document.hasFocus() ? 50 : 500)) return;
+    if (now - lastDraw < (document.hasFocus() ? 250 : 1000)) return;
     lastDraw = now;
     const inSession = sessionEl && (sessionEl.classList.contains("open") || sessionEl.classList.contains("closing"));
     if (inSession) drawOrbits(now);
