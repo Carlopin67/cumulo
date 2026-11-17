@@ -247,7 +247,7 @@
   const limitsSource = window.CUMULO_LIMITS || limitsSimulator();
   const limitsEl = document.getElementById("monLimits");
   document.getElementById("limSub").textContent = window.CUMULO_LIMITS ? "" : "simulado";
-  // Diseño «órbitas»: cada límite es una órbita alrededor de una estrella.
+  // Diseño «órbitas»: cada límite es una órbita.
   // El arco es lo gastado (se ilumina hacia su punta, como un cometa); la bolita hueca es el tiempo
   // que ha pasado de la ventana. Si la punta adelanta a la bolita, se gasta más rápido de lo que pasa
   // el tiempo. Puntos: uno por día en la semanal (7) y uno por hora en la de 5 h (5).
@@ -307,12 +307,6 @@
     const t = now / 1000, cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 14; // margen para que el brillo no se corte
     const TOP = -Math.PI / 2, TAU = Math.PI * 2;
     const ink = a => withAlpha(colors.ink, a);
-
-    // estrella central
-    const sun = g.createRadialGradient(cx, cy, 0, cx, cy, 14);
-    sun.addColorStop(0, withAlpha(colors.ink, light ? 0.22 : 0.35)); sun.addColorStop(1, withAlpha(colors.ink, 0));
-    g.fillStyle = sun; g.fillRect(cx - 15, cy - 15, 30, 30);
-    g.fillStyle = colors.ink; g.beginPath(); g.arc(cx, cy, 1.8, 0, TAU); g.fill();
 
     for (const L of LIMITS) {
       const l = limits[L.k]; if (!l) continue;
