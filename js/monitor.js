@@ -248,7 +248,9 @@
   const limitsEl = document.getElementById("monLimits");
   document.getElementById("limSub").textContent = window.CUMULO_LIMITS ? "" : "simulado";
   // Diseño «órbitas»: cada límite es una órbita alrededor de una estrella.
-  // El arco iluminado es lo gastado y la bolita marca hasta dónde llega; un punto cada 20 %.
+  // El arco es lo gastado (se ilumina hacia su punta, como un cometa); la bolita hueca es el tiempo
+  // que ha pasado de la ventana. Si la punta adelanta a la bolita, se gasta más rápido de lo que pasa
+  // el tiempo. Un punto cada 20 %.
   const LIMITS = [
     { k: "weekly", label: "Semanal", ring: 1, step: 86400e3 },
     { k: "session", label: "5 horas", ring: 0.6, step: 3600e3 },
@@ -258,7 +260,7 @@
       <canvas class="orbit-cv" aria-hidden="true"></canvas>
       <div class="orbit-info"></div>
     </div>
-    <p class="orbit-key"><span class="k-arc"></span>gastado <span class="k-tick"></span>cada punto, 20 %</p>`;
+    <p class="orbit-key"><span class="k-arc"></span>gastado <span class="k-dot"></span>tiempo pasado <span class="k-tick"></span>20 %</p>`;
   const orbitCv = limitsEl.querySelector(".orbit-cv"), info = limitsEl.querySelector(".orbit-info");
   LIMITS.forEach(L => {
     const d = document.createElement("div"); d.className = "oi";
@@ -266,7 +268,7 @@
       <p class="oi-sub"></p><p class="oi-proj"></p>`;
     d.querySelector(".oi-name").textContent = L.label;
     L.el = d; L.b = d.querySelector("b"); L.reset = d.querySelector(".oi-sub"); L.proj = d.querySelector(".oi-proj");
-    L.shown = 0;
+    L.shown = 0; L.shownT = 0;
     info.appendChild(d);
   });
 
@@ -316,6 +318,7 @@
       const l = limits[L.k]; if (!l) continue;
       const r = R * L.ring;
       L.shown += (l.used - L.shown) * k;          // el arco crece suave al abrir
+      L.shownT += ((L.elapsed || 0) - L.shownT) * k;
       const col = colorFor(L.level || "");
 
       // órbita y un punto cada 20 % (el de arriba es el 0 % / 100 %)
@@ -327,18 +330,34 @@
         g.beginPath(); g.arc(cx + Math.cos(a) * r, cy + Math.sin(a) * r, i === 0 ? 1.6 : 1.3, 0, TAU); g.fill();
       }
 
-      // arco gastado con halo
+      // arco gastado: se ilumina hacia la punta, como la cola de un cometa
       const a1 = TOP + clamp(L.shown, 0, 1) * TAU;
       if (L.shown > 0.002) {
-        g.lineCap = "round";
-        g.strokeStyle = withAlpha(col, light ? 0.13 : 0.22); g.lineWidth = 7;
+        const frac = clamp(L.shown, 0.001, 1);
+        const grad = (lo, hi) => {
+          if (!g.createConicGradient) return withAlpha(col, hi);
+          const cg = g.createConicGradient(TOP, cx, cy);
+          cg.addColorStop(0, withAlpha(col, lo)); cg.addColorStop(frac, withAlpha(col, hi));
+          cg.addColorStop(Math.min(1, frac + 0.0001), withAlpha(col, 0)); cg.addColorStop(1, withAlpha(col, 0));
+          return cg;
+        };
+        g.lineCap = "butt";
+        g.strokeStyle = grad(0, light ? 0.16 : 0.28); g.lineWidth = 8;
         g.beginPath(); g.arc(cx, cy, r, TOP, a1); g.stroke();
-        g.strokeStyle = col; g.lineWidth = 2;
+        g.strokeStyle = grad(light ? 0.18 : 0.12, 1); g.lineWidth = 2;
         g.beginPath(); g.arc(cx, cy, r, TOP, a1); g.stroke();
+
+        // punta: punto relleno que brilla, marca hasta dónde llega el uso
+        const hx = cx + Math.cos(a1) * r, hy = cy + Math.sin(a1) * r;
+        const hg = g.createRadialGradient(hx, hy, 0, hx, hy, 9);
+        hg.addColorStop(0, withAlpha(col, (light ? 0.3 : 0.55) + 0.12 * Math.sin(t * 2.6 + L.ring * 2)));
+        hg.addColorStop(1, withAlpha(col, 0));
+        g.fillStyle = hg; g.fillRect(hx - 10, hy - 10, 20, 20);
+        g.fillStyle = col; g.beginPath(); g.arc(hx, hy, 2.6, 0, TAU); g.fill();
       }
 
-      // bolita al final del arco: por dónde va el límite
-      const ap = a1;
+      // planeta (bolita hueca): tiempo pasado de la ventana
+      const ap = TOP + clamp(L.shownT, 0, 1) * TAU;
       const px = cx + Math.cos(ap) * r, py = cy + Math.sin(ap) * r;
       const glow = g.createRadialGradient(px, py, 0, px, py, 10);
       glow.addColorStop(0, ink((light ? 0.16 : 0.35) + 0.08 * Math.sin(t * 2 + L.ring * 3))); glow.addColorStop(1, ink(0));
