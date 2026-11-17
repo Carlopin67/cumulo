@@ -111,7 +111,7 @@
   let colors = {}, light = false;
   const readColors = () => {
     const cs = getComputedStyle(document.documentElement);
-    colors = { ink: cs.getPropertyValue("--ink").trim(), warn: cs.getPropertyValue("--warn").trim(), crit: cs.getPropertyValue("--crit").trim() };
+    colors = { bg: cs.getPropertyValue("--bg").trim(), ink: cs.getPropertyValue("--ink").trim(), warn: cs.getPropertyValue("--warn").trim(), crit: cs.getPropertyValue("--crit").trim() };
     light = document.documentElement.dataset.theme === "light";
   };
   readColors();
@@ -247,20 +247,28 @@
   const limitsSource = window.CUMULO_LIMITS || limitsSimulator();
   const limitsEl = document.getElementById("monLimits");
   document.getElementById("limSub").textContent = window.CUMULO_LIMITS ? "" : "simulado";
+  // Diseño «órbitas»: cada límite es una órbita alrededor de una estrella.
+  // El arco iluminado es lo gastado; el planeta marca cuánto tiempo de la ventana ha pasado.
+  // Si el arco adelanta al planeta, se está gastando más rápido de lo que pasa el tiempo.
   const LIMITS = [
-    { k: "session", label: "Sesión · 5 h" },
-    { k: "weekly", label: "Semanal" },
+    { k: "weekly", label: "Semanal", ring: 1, step: 86400e3 },
+    { k: "session", label: "5 horas", ring: 0.6, step: 3600e3 },
   ];
+  limitsEl.innerHTML = `
+    <div class="orbits">
+      <canvas class="orbit-cv" aria-hidden="true"></canvas>
+      <div class="orbit-info"></div>
+    </div>
+    <p class="orbit-key"><span class="k-arc"></span>gastado <span class="k-dot"></span>tiempo pasado</p>`;
+  const orbitCv = limitsEl.querySelector(".orbit-cv"), info = limitsEl.querySelector(".orbit-info");
   LIMITS.forEach(L => {
-    const d = document.createElement("div"); d.className = "mrow lrow";
-    d.innerHTML = `
-      <div class="mtop"><span class="mlabel"></span><span class="mval"><b></b><small> %</small></span></div>
-      <canvas class="spark lspark" aria-hidden="true"></canvas>
-      <p class="mdetail ldetail"><span class="lproj"></span><span class="lreset"></span></p>`;
-    d.querySelector(".mlabel").textContent = L.label;
-    L.el = d; L.b = d.querySelector("b"); L.canvas = d.querySelector("canvas");
-    L.proj = d.querySelector(".lproj"); L.reset = d.querySelector(".lreset");
-    limitsEl.appendChild(d);
+    const d = document.createElement("div"); d.className = "oi";
+    d.innerHTML = `<p class="oi-top"><span class="oi-mark ${L.ring === 1 ? "outer" : "inner"}"></span><span class="oi-name"></span><b></b></p>
+      <p class="oi-sub"></p><p class="oi-proj"></p>`;
+    d.querySelector(".oi-name").textContent = L.label;
+    L.el = d; L.b = d.querySelector("b"); L.reset = d.querySelector(".oi-sub"); L.proj = d.querySelector(".oi-proj");
+    L.shown = 0; L.shownT = 0;
+    info.appendChild(d);
   });
 
   const dur = ms => {
@@ -274,68 +282,83 @@
     for (const L of LIMITS) {
       const l = limits[L.k]; if (!l) continue;
       const pct = l.used * 100;
-      L.b.textContent = f0.format(pct);
-      const elapsed = clamp((now - l.start) / (l.end - l.start), 0.02, 1);
-      L.projected = Math.min(1.5, l.used / elapsed);
-      L.proj.textContent = L.projected >= 1 ? "a este ritmo llegarás al límite" : `a este ritmo, ~${f0.format(L.projected * 100)} % al final`;
-      L.reset.textContent = `se reinicia en ${dur(l.end - now)}`;
+      L.elapsed = clamp((now - l.start) / (l.end - l.start), 0, 1);
+      L.b.textContent = `${f0.format(pct)} %`;
+      L.projected = Math.min(1.5, l.used / Math.max(L.elapsed, 0.02));
+      L.reset.textContent = `reinicia en ${dur(l.end - now)}`;
+      L.proj.textContent = L.projected >= 1 ? "a este ritmo: al límite" : `a este ritmo: ~${f0.format(L.projected * 100)} %`;
       const lvl = levelOf(Math.max(pct, L.projected >= 1 ? 75 : 0));
       if (lvl !== L.level) { L.level = lvl; L.el.dataset.level = lvl; }
     }
   }
 
-  // gráfica: uso acumulado dentro de la ventana, línea del 100 %, marca de «ahora» y proyección punteada
-  function drawLimit(L) {
-    const l = limits && limits[L.k]; if (!l) return;
-    const c = L.canvas, w = c.clientWidth, h = c.clientHeight;
+  let lastOrbit = 0;
+  function drawOrbits(now) {
+    if (!limits) return;
+    const c = orbitCv, w = c.clientWidth, h = c.clientHeight;
     if (!w || !h) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
     const g = c.getContext("2d");
     g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
-    const now = Date.now(), top = 5, pad = 4;
-    const x = t => pad + clamp((t - l.start) / (l.end - l.start), 0, 1) * (w - pad * 2);
-    const y = u => h - 1 - clamp(u, 0, 1.05) / 1.05 * (h - top - 2);
-    const col = colorFor(L.level || "");
-    const hs = l.history.concat([[now, l.used]]);
+    const dt = Math.min(0.1, (now - lastOrbit) / 1000 || 0.016); lastOrbit = now;
+    const k = RM.matches ? 1 : 1 - Math.exp(-dt * 3);
+    const t = now / 1000, cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 9;
+    const TOP = -Math.PI / 2, TAU = Math.PI * 2;
+    const ink = a => withAlpha(colors.ink, a);
 
-    // 100 % y marcas de la ventana (cada hora / cada día)
-    g.strokeStyle = withAlpha(colors.ink, light ? 0.18 : 0.22); g.lineWidth = 1; g.setLineDash([2, 3]);
-    g.beginPath(); g.moveTo(pad, Math.round(y(1)) + 0.5); g.lineTo(w - pad, Math.round(y(1)) + 0.5); g.stroke();
-    g.setLineDash([]);
-    const step = L.k === "session" ? 3600e3 : 86400e3;
-    g.fillStyle = withAlpha(colors.ink, light ? 0.2 : 0.25);
-    for (let t = l.start; t <= l.end + 1; t += step) g.fillRect(Math.round(x(t)), h - 3, 1, 3);
+    // estrella central
+    const sun = g.createRadialGradient(cx, cy, 0, cx, cy, 14);
+    sun.addColorStop(0, withAlpha(colors.ink, light ? 0.22 : 0.35)); sun.addColorStop(1, withAlpha(colors.ink, 0));
+    g.fillStyle = sun; g.fillRect(cx - 15, cy - 15, 30, 30);
+    g.fillStyle = colors.ink; g.beginPath(); g.arc(cx, cy, 1.8, 0, TAU); g.fill();
 
-    // proyección al ritmo actual
-    const ex = x(l.end), ey = y(Math.min(1.05, L.projected || l.used));
-    g.strokeStyle = withAlpha(col, 0.45); g.setLineDash([1, 3]); g.lineWidth = 1.2;
-    g.beginPath(); g.moveTo(x(now), y(l.used)); g.lineTo(ex, ey); g.stroke(); g.setLineDash([]);
+    for (const L of LIMITS) {
+      const l = limits[L.k]; if (!l) continue;
+      const r = R * L.ring;
+      L.shown += (l.used - L.shown) * k;          // el arco crece suave al abrir
+      L.shownT += ((L.elapsed || 0) - L.shownT) * k;
+      const col = colorFor(L.level || "");
 
-    // área y línea del uso hasta ahora
-    const path = () => { g.beginPath(); hs.forEach(([t, u], i) => i ? g.lineTo(x(t), y(u)) : g.moveTo(x(t), y(u))); };
-    const grad = g.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, withAlpha(col, light ? 0.18 : 0.26)); grad.addColorStop(1, withAlpha(col, 0));
-    path(); g.lineTo(x(now), h); g.lineTo(x(l.start), h); g.closePath(); g.fillStyle = grad; g.fill();
-    g.lineJoin = "round"; g.lineCap = "round";
-    path(); g.strokeStyle = withAlpha(col, light ? 0.12 : 0.22); g.lineWidth = 5; g.stroke();
-    path(); g.strokeStyle = col; g.lineWidth = 1.2; g.stroke();
+      // órbita y marcas (horas o días)
+      g.strokeStyle = ink(light ? 0.13 : 0.16); g.lineWidth = 1;
+      g.beginPath(); g.arc(cx, cy, r, 0, TAU); g.stroke();
+      const n = Math.round((l.end - l.start) / L.step);
+      g.fillStyle = ink(light ? 0.3 : 0.32);
+      for (let i = 0; i < n; i++) {
+        const a = TOP + i / n * TAU;
+        g.beginPath(); g.arc(cx + Math.cos(a) * r, cy + Math.sin(a) * r, i === 0 ? 0 : 0.9, 0, TAU); g.fill();
+      }
+      // reinicio (arriba)
+      g.strokeStyle = ink(light ? 0.45 : 0.5); g.lineWidth = 1.2;
+      g.beginPath(); g.moveTo(cx, cy - r - 4); g.lineTo(cx, cy - r + 4); g.stroke();
 
-    // ahora
-    const nx = x(now), ny = y(l.used), t = performance.now() / 1000;
-    g.strokeStyle = withAlpha(colors.ink, light ? 0.15 : 0.2); g.lineWidth = 1;
-    g.beginPath(); g.moveTo(Math.round(nx) + 0.5, top); g.lineTo(Math.round(nx) + 0.5, h); g.stroke();
-    const glow = g.createRadialGradient(nx, ny, 0, nx, ny, 9);
-    glow.addColorStop(0, withAlpha(col, (light ? 0.14 : 0.4) + 0.1 * Math.sin(t * 2.4))); glow.addColorStop(1, withAlpha(col, 0));
-    g.fillStyle = glow; g.fillRect(nx - 10, ny - 10, 20, 20);
-    g.fillStyle = col; g.beginPath(); g.arc(nx, ny, 2, 0, 6.283); g.fill();
+      // arco gastado con halo
+      const a1 = TOP + clamp(L.shown, 0, 1) * TAU;
+      if (L.shown > 0.002) {
+        g.lineCap = "round";
+        g.strokeStyle = withAlpha(col, light ? 0.13 : 0.22); g.lineWidth = 7;
+        g.beginPath(); g.arc(cx, cy, r, TOP, a1); g.stroke();
+        g.strokeStyle = col; g.lineWidth = 2;
+        g.beginPath(); g.arc(cx, cy, r, TOP, a1); g.stroke();
+      }
+
+      // planeta: tiempo pasado de la ventana
+      const ap = TOP + clamp(L.shownT, 0, 1) * TAU;
+      const px = cx + Math.cos(ap) * r, py = cy + Math.sin(ap) * r;
+      const glow = g.createRadialGradient(px, py, 0, px, py, 10);
+      glow.addColorStop(0, ink((light ? 0.16 : 0.35) + 0.08 * Math.sin(t * 2 + L.ring * 3))); glow.addColorStop(1, ink(0));
+      g.fillStyle = glow; g.fillRect(px - 11, py - 11, 22, 22);
+      g.fillStyle = withAlpha(colors.bg, 1); g.beginPath(); g.arc(px, py, 4.2, 0, TAU); g.fill();
+      g.strokeStyle = colors.ink; g.lineWidth = 1.4; g.beginPath(); g.arc(px, py, 3.2, 0, TAU); g.stroke();
+    }
   }
 
   const sessionEl = document.getElementById("session");
   let last = 0;
   function loop(now) {
     const inSession = sessionEl && (sessionEl.classList.contains("open") || sessionEl.classList.contains("closing"));
-    if (inSession) LIMITS.forEach(drawLimit);
+    if (inSession) drawOrbits(now);
     const visible = open && inSession;
     if (visible && target) {
       const dt = Math.min(0.1, (now - last) / 1000 || 0.016);
