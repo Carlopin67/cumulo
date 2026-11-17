@@ -347,13 +347,14 @@
         g.strokeStyle = grad(light ? 0.18 : 0.12, 1); g.lineWidth = 2;
         g.beginPath(); g.arc(cx, cy, r, TOP, a1); g.stroke();
 
-        // punta: punto relleno que brilla, marca hasta dónde llega el uso
+        // punta: solo un haz de luz (sin bolita) que marca hasta dónde llega el uso
         const hx = cx + Math.cos(a1) * r, hy = cy + Math.sin(a1) * r;
-        const hg = g.createRadialGradient(hx, hy, 0, hx, hy, 9);
-        hg.addColorStop(0, withAlpha(col, (light ? 0.3 : 0.55) + 0.12 * Math.sin(t * 2.6 + L.ring * 2)));
+        const pulse = 0.12 * Math.sin(t * 2.6 + L.ring * 2);
+        const hg = g.createRadialGradient(hx, hy, 0, hx, hy, 12);
+        hg.addColorStop(0, withAlpha(col, (light ? 0.38 : 0.75) + pulse));
+        hg.addColorStop(0.35, withAlpha(col, light ? 0.14 : 0.25));
         hg.addColorStop(1, withAlpha(col, 0));
-        g.fillStyle = hg; g.fillRect(hx - 10, hy - 10, 20, 20);
-        g.fillStyle = col; g.beginPath(); g.arc(hx, hy, 2.6, 0, TAU); g.fill();
+        g.fillStyle = hg; g.fillRect(hx - 13, hy - 13, 26, 26);
       }
 
       // planeta (bolita hueca): tiempo pasado de la ventana
@@ -368,10 +369,10 @@
   }
 
   // ── ventana de contexto de la sesión abierta ────────────────
-  // Como `/context` de Claude Code: 100 casillas (1 % cada una) repartidas por categorías.
+  // Como `/context` de Claude Code: 100 casillas (1 % = 10k tokens cada una) repartidas por categorías.
   // Simulado a partir de la sesión; la versión instalable lo leerá de la sesión real.
   // Desde app.js: window.cumuloMonitor.setSession(sesión | null) y .addMessage(caracteres, imágenes).
-  const CTX_TOTAL = 200000, CTX_RESERVE = 45000; // reserva antes de autocompactar
+  const CTX_TOTAL = 1000000, CTX_RESERVE = 45000; // ventana de 1M de tokens; reserva antes de autocompactar
   const CTX_CATS = [
     { k: "system", label: "Sistema", a: 0.3 },
     { k: "tools", label: "Herramientas", a: 0.45 },
@@ -381,7 +382,7 @@
   ];
   const ctxEl = document.getElementById("monContext");
   ctxEl.innerHTML = `
-    <p class="ctx-sum"><b class="ctx-used"></b><span class="ctx-of"> / 200k</span><span class="ctx-pct"></span></p>
+    <p class="ctx-sum"><b class="ctx-used"></b><span class="ctx-of"> / 1M</span><span class="ctx-pct"></span></p>
     <div class="ctx-grid" aria-hidden="true">${Array.from({ length: 100 }, () => "<i></i>").join("")}</div>
     <ul class="ctx-legend">${CTX_CATS.map(c => `<li data-k="${c.k}"><span class="sw"></span><span class="nm">${c.label}</span><span class="tk"></span></li>`).join("")}
       <li data-k="free"><span class="sw"></span><span class="nm">Libre</span><span class="tk"></span></li>
@@ -389,7 +390,7 @@
     </ul>
     <p class="ctx-note"></p>`;
   const cells = [...ctxEl.querySelectorAll(".ctx-grid i")];
-  const kfmt = n => n >= 1000 ? `${f1.format(n / 1000)}k` : f0.format(n);
+  const kfmt = n => n >= 1e6 ? `${f1.format(n / 1e6)}M` : n >= 1000 ? `${f1.format(n / 1000)}k` : f0.format(n);
   let ctx = null;
 
   function renderContext(fresh) {
@@ -431,7 +432,7 @@
       const seed = s ? s.id.charCodeAt(0) + s.id.charCodeAt(1) : 7;
       ctx = {
         system: 3100, tools: 11600, mcp: 2400 + (seed % 5) * 900, memory: 1200 + (seed % 7) * 260,
-        messages: Math.min(120000, msgs * 980 + (seed % 11) * 400),
+        messages: Math.min(700000, msgs * 4200 + (seed % 11) * 1800), // sesiones largas llenan bastante más
       };
       renderContext(true);
     },
