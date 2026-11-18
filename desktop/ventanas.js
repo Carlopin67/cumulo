@@ -36,7 +36,8 @@ public class W {
 [void][W]::SetProcessDPIAware()   # medidas reales de la pantalla (con zoom del 125 % también)
 while ($true) {
   $line = [Console]::In.ReadLine(); if ($line -eq $null) { break }
-  $p = $line.Split(' ', 3); $cmd = $p[0]
+  # cada orden llega como «número orden dato» y su respuesta sale con el mismo número delante
+  $p = $line.Split(' ', 3); $id = $p[0]; $cmd = $p[1]; $arg = $p[2]
   try {
     if ($cmd -eq 'list') {
       $fg = [W]::GetForegroundWindow(); $out = New-Object System.Collections.ArrayList
@@ -53,38 +54,52 @@ while ($true) {
         [void]$out.Add(@{ h = $h.ToInt64(); title = $sb.ToString(); pid = $wpid; name = $pr.ProcessName; path = $pr.Path; min = [W]::IsIconic($h); fg = ($h -eq $fg) })
         return $true }
       [void][W]::EnumWindows($cb, [IntPtr]::Zero)
-      [Console]::Out.WriteLine((ConvertTo-Json -Compress -Depth 3 @($out)))
+      [Console]::Out.WriteLine("$id " + (ConvertTo-Json -Compress -Depth 3 @($out)))
     } elseif ($cmd -eq 'focus') {
-      $h = [IntPtr][Int64]$p[1]
+      $h = [IntPtr][Int64]$arg
       if ([W]::IsIconic($h)) { [void][W]::ShowWindowAsync($h, 9) }
       [W]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [W]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero) # Alt: permite traer la ventana delante
-      [void][W]::SetForegroundWindow($h); [Console]::Out.WriteLine('ok')
-    } elseif ($cmd -eq 'min') { [void][W]::ShowWindowAsync([IntPtr][Int64]$p[1], 6); [Console]::Out.WriteLine('ok')
+      [void][W]::SetForegroundWindow($h); [Console]::Out.WriteLine("$id ok")
+    } elseif ($cmd -eq 'min') { [void][W]::ShowWindowAsync([IntPtr][Int64]$arg, 6); [Console]::Out.WriteLine("$id ok")
     } elseif ($cmd -eq 'workarea') {
       # zona de trabajo: lo que pueden ocupar las ventanas maximizadas (deja libre la barra de abajo)
-      $v = $p[1].Split(','); $r = New-Object W+RECT; $r.L = [int]$v[0]; $r.T = [int]$v[1]; $r.R = [int]$v[2]; $r.B = [int]$v[3]
-      [void][W]::SystemParametersInfo(0x2F, 0, [ref]$r, 3); [Console]::Out.WriteLine('ok')
-    } elseif ($cmd -eq 'close') { [void][W]::PostMessage([IntPtr][Int64]$p[1], 0x10, [IntPtr]::Zero, [IntPtr]::Zero); [Console]::Out.WriteLine('ok')
-    } else { [Console]::Out.WriteLine('?') }
-  } catch { [Console]::Out.WriteLine('[]') }
+      $v = $arg.Split(','); $r = New-Object W+RECT; $r.L = [int]$v[0]; $r.T = [int]$v[1]; $r.R = [int]$v[2]; $r.B = [int]$v[3]
+      [void][W]::SystemParametersInfo(0x2F, 0, [ref]$r, 3); [Console]::Out.WriteLine("$id ok")
+    } elseif ($cmd -eq 'close') { [void][W]::PostMessage([IntPtr][Int64]$arg, 0x10, [IntPtr]::Zero, [IntPtr]::Zero); [Console]::Out.WriteLine("$id ok")
+    } else { [Console]::Out.WriteLine("$id ?") }
+  } catch { [Console]::Out.WriteLine("$id []") }
 }
 `;
 
-let ps = null, queue = [], buf = "";
+// Cada pregunta lleva un n\u00famero y espera SU respuesta: si una tarda o se pierde, las dem\u00e1s no se descolocan,
+// y como mucho se esperan unos segundos (la barra nunca se queda colgada).
+let ps = null, buf = "", seq = 0;
+const waiting = new Map(); // n\u00famero \u2192 { r, t, fb }
+const settle = (id, v) => { const w = waiting.get(id); if (!w) return; waiting.delete(id); clearTimeout(w.t); w.r(v === undefined ? w.fb : v); };
 function start(dir) {
   const file = path.join(dir, "ventanas.ps1");
   fs.writeFileSync(file, "\ufeff" + PS);
-  ps = spawn("powershell.exe", ["-NoProfile", "-NoLogo", "-ExecutionPolicy", "Bypass", "-File", file], { windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
-  ps.stdout.setEncoding("utf8");
-  ps.stdout.on("data", d => {
+  const me = spawn("powershell.exe", ["-NoProfile", "-NoLogo", "-ExecutionPolicy", "Bypass", "-File", file], { windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
+  ps = me; buf = "";
+  me.on("error", () => { if (ps === me) ps = null; }); // sin PowerShell: se responde con lo de reserva
+  me.stdin.on("error", () => { /* se cerr\u00f3 mientras se le escrib\u00eda */ });
+  me.stdout.setEncoding("utf8");
+  me.stdout.on("data", d => {
+    if (ps !== me) return;
     buf += d; let i;
-    while ((i = buf.indexOf("\n")) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); const q = queue.shift(); if (q) q(line); }
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+      const sp = line.indexOf(" "); if (sp > 0) settle(line.slice(0, sp), line.slice(sp + 1));
+    }
   });
-  ps.on("exit", () => { ps = null; queue.splice(0).forEach(q => q("[]")); });
+  me.on("exit", () => { if (ps === me) ps = null; [...waiting.keys()].forEach(id => settle(id)); });
 }
-function ask(cmd, dir) {
-  if (!ps) start(dir);
-  return new Promise(r => { queue.push(r); ps.stdin.write(cmd + "\n"); });
+function ask(cmd, dir, fb = "[]", ms = 8000) {
+  return new Promise(r => {
+    const id = String(++seq);
+    waiting.set(id, { r, fb, t: setTimeout(() => settle(id), ms) });
+    try { if (!ps) start(dir); ps.stdin.write(id + " " + cmd + "\n"); } catch { settle(id); }
+  });
 }
 async function list(dir, selfPid) {
   const raw = await ask("list", dir);
@@ -135,8 +150,10 @@ async function runStartup(log) {
   for (const d of folders) {
     let ents = []; try { ents = fs.readdirSync(d); } catch { continue; }
     for (const f of ents) if (!/desktop\.ini$/i.test(f)) {
-      spawn("cmd.exe", ["/d", "/s", "/c", `start "" "${path.join(d, f)}"`], { windowsHide: true, detached: true, stdio: "ignore", windowsVerbatimArguments: true }).unref();
-      log(`inicio: ${f}`);
+      try {
+        spawn("cmd.exe", ["/d", "/s", "/c", `start "" "${path.join(d, f)}"`], { windowsHide: true, detached: true, stdio: "ignore", windowsVerbatimArguments: true }).unref();
+        log(`inicio: ${f}`);
+      } catch { log(`inicio falló: ${f}`); }
     }
   }
 }
@@ -172,5 +189,5 @@ function shellSet(exe, dir) {
 module.exports = {
   workArea: (l, t, r, b, dir) => ask(`workarea ${l},${t},${r},${b}`, dir),
   list, focus: (h, dir) => ask(`focus ${h}`, dir), minimize: (h, dir) => ask(`min ${h}`, dir), close: (h, dir) => ask(`close ${h}`, dir),
-  runStartup, shellGet, shellSet, stop: () => { if (ps) ps.kill(); },
+  runStartup, shellGet, shellSet, stop: () => { if (ps) { const p = ps; ps = null; try { p.kill(); } catch { /* ya cerrado */ } } },
 };

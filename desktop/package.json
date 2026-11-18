@@ -1,13 +1,12 @@
 {
   "name": "cumulo",
   "productName": "Cúmulo",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "Lanzador de sesiones de Claude Code como cúmulo de estrellas",
   "main": "main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
-    "datos": "node generar-datos.js",
     "instalador": "electron-builder --win nsis"
   },
   "devDependencies": {

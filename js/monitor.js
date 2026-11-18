@@ -246,7 +246,8 @@
   }
   const limitsSource = window.CUMULO_LIMITS || limitsSimulator();
   const limitsEl = document.getElementById("monLimits");
-  document.getElementById("limSub").textContent = window.CUMULO_LIMITS ? "" : "simulado";
+  const limSub = document.getElementById("limSub");
+  limSub.textContent = window.CUMULO_LIMITS ? "" : "simulado";
   // Diseño «órbitas»: cada límite es una órbita.
   // El arco es lo gastado (se ilumina hacia su punta, como un cometa); la bolita hueca es el tiempo
   // que ha pasado de la ventana. Si la punta adelanta a la bolita, se gasta más rápido de lo que pasa
@@ -279,6 +280,9 @@
   let limits = null;
   function readLimits() {
     try { limits = limitsSource.read(); } catch (e) { return; }
+    // app instalable sin datos todavía (aparecen tras el primer mensaje a Claude)
+    if (window.CUMULO_LIMITS) { const t = limits ? "" : "sin datos aún"; if (limSub.textContent !== t) limSub.textContent = t; }
+    if (!limits) return;
     const now = Date.now();
     for (const L of LIMITS) {
       const l = limits[L.k]; if (!l) continue;
@@ -296,7 +300,7 @@
   }
   function usage() {
     if (!limits) return [];
-    return LIMITS.map(L => ({ k: L.k, label: L.label, used: limits[L.k].used, elapsed: L.elapsed || 0, reset: L.reset.textContent, level: L.level || "" }));
+    return LIMITS.filter(L => limits[L.k]).map(L => ({ k: L.k, label: L.label, used: limits[L.k].used, elapsed: L.elapsed || 0, reset: L.reset.textContent, level: L.level || "" }));
   }
 
   let lastOrbit = 0;

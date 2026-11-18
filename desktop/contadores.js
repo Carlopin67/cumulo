@@ -10,8 +10,9 @@ const PS = String.raw`
 $ErrorActionPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $cache = $args[0]
-if (Test-Path $cache) { $paths = Get-Content $cache -Encoding UTF8 | ? { $_ } }
-else {
+$paths = @()
+if (Test-Path $cache) { $paths = @(Get-Content $cache -Encoding UTF8 | ? { $_ }) }
+if (-not $paths) {
   # los nombres de los contadores dependen del idioma de Windows: se buscan una vez y se guardan
   $sets = Get-Counter -ListSet *
   function Find($rx) { ($sets | % { $_.Paths } | ? { $_ -match $rx } | select -First 1) }
@@ -24,8 +25,9 @@ else {
     (Find '\\(Network Interface|Interfaz de red)\(\*\)\\(Bytes Received/sec|Bytes recibidos/s)$'),
     (Find '\\(Network Interface|Interfaz de red)\(\*\)\\(Bytes Sent/sec|Bytes enviados/s)$')
   ) | ? { $_ }
-  $paths | Set-Content $cache -Encoding UTF8
+  if ($paths) { $paths | Set-Content $cache -Encoding UTF8 } # si no salió nada, se vuelve a buscar la próxima vez
 }
+if (-not $paths) { exit 1 }
 $paths = $paths | % { if ($_ -match 'GPU Engine') { $_ -replace '\(\*\)', '(*engtype_3D)' } else { $_ } }
 Get-Counter -Counter $paths -Continuous -SampleInterval 2 | % {
   $o = @{ cpu = 0; rd = 0; wr = 0; gpu = 0; vram = 0; down = 0; up = 0 }
@@ -43,22 +45,26 @@ Get-Counter -Counter $paths -Continuous -SampleInterval 2 | % {
 }
 `;
 
-let ps = null, last = null, stopTimer = 0, dir = null;
+let ps = null, last = null, stopTimer = 0, dir = null, startedAt = 0;
 function start() {
-  if (ps) return;
+  // si se cae, no se relanza en bucle: como mucho uno cada 15 s (mientras tanto el monitor usa sus lecturas de reserva)
+  if (ps || !dir || Date.now() - startedAt < 15000) return;
+  startedAt = Date.now();
   const file = path.join(dir, "contadores.ps1");
-  fs.writeFileSync(file, "﻿" + PS);
-  ps = spawn("powershell.exe", ["-NoProfile", "-NoLogo", "-ExecutionPolicy", "Bypass", "-File", file, path.join(dir, "contadores.txt")],
+  try { fs.writeFileSync(file, "﻿" + PS); } catch { return; }
+  const me = spawn("powershell.exe", ["-NoProfile", "-NoLogo", "-ExecutionPolicy", "Bypass", "-File", file, path.join(dir, "contadores.txt")],
     { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+  ps = me;
   let buf = "";
-  ps.stdout.setEncoding("utf8");
-  ps.stdout.on("data", d => {
+  me.on("error", () => { if (ps === me) ps = null; });
+  me.stdout.setEncoding("utf8");
+  me.stdout.on("data", d => {
     buf += d; let i;
     while ((i = buf.indexOf("\n")) >= 0) { const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1); try { last = { ...JSON.parse(l), at: Date.now() }; } catch { /* línea a medias */ } }
   });
-  ps.on("exit", () => { ps = null; });
+  me.on("exit", () => { if (ps === me) ps = null; }); // el aviso de uno viejo no borra al nuevo
 }
-function stop() { if (ps) { ps.kill(); ps = null; } }
+function stop() { if (ps) { const p = ps; ps = null; startedAt = 0; try { p.kill(); } catch { /* ya cerrado */ } } }
 
 module.exports = {
   // activo: arranca (si no estaba); inactivo: se cierra a los 10 s para no gastar nada

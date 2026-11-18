@@ -35,14 +35,18 @@ public static class TeclaWin {
 [TeclaWin]::Run()
 `;
 
-let ps = null, stopped = false;
+let ps = null, stopped = false, retry = 0;
 function start(dir, onPress) {
-  stopped = false;
-  const file = path.join(dir, "teclawin.ps1");
-  fs.writeFileSync(file, "﻿" + PS);
-  ps = spawn("powershell.exe", ["-NoProfile", "-NoLogo", "-STA", "-ExecutionPolicy", "Bypass", "-File", file], { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
-  ps.stdout.setEncoding("utf8");
-  ps.stdout.on("data", d => { if (d.includes("win")) onPress(); });
-  ps.on("exit", () => { ps = null; if (!stopped) setTimeout(() => start(dir, onPress), 3000); }); // si se cae, vuelve
+  stopped = false; clearTimeout(retry);
+  if (ps) return; // ya está escuchando
+  const again = () => { if (!stopped) { clearTimeout(retry); retry = setTimeout(() => start(dir, onPress), 3000); } }; // si se cae, vuelve
+  try { fs.writeFileSync(path.join(dir, "teclawin.ps1"), "﻿" + PS); } catch { again(); return; }
+  const me = spawn("powershell.exe", ["-NoProfile", "-NoLogo", "-STA", "-ExecutionPolicy", "Bypass", "-File", path.join(dir, "teclawin.ps1")], { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+  ps = me;
+  me.on("error", () => { if (ps === me) { ps = null; again(); } });
+  me.stdout.setEncoding("utf8");
+  me.stdout.on("data", d => { if (d.includes("win")) onPress(); });
+  me.on("exit", () => { if (ps === me) { ps = null; again(); } });
 }
-module.exports = { start, stop: () => { stopped = true; if (ps) ps.kill(); } };
+function stop() { stopped = true; clearTimeout(retry); if (ps) { const p = ps; ps = null; try { p.kill(); } catch { /* ya cerrado */ } } }
+module.exports = { start, stop };

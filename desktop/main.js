@@ -17,6 +17,13 @@ const teclawin = require("./teclawin");
 const SHELL = process.argv.includes("--shell");
 const LOG = [];
 const log = m => { LOG.push(new Date().toISOString().slice(11, 19) + " " + m); if (LOG.length > 300) LOG.shift(); };
+// un fallo inesperado no debe tumbar Cúmulo (y menos siendo el escritorio): se apunta en un registro y sigue
+const logError = (what, e) => {
+  log(what + ": " + (e && e.stack || e));
+  try { fs.appendFileSync(path.join(app.getPath("userData"), "errores.log"), new Date().toISOString() + " " + what + ": " + (e && e.stack || e) + "\n"); } catch { /* sin disco */ }
+};
+process.on("uncaughtException", e => logError("excepción", e));
+process.on("unhandledRejection", e => logError("promesa", e));
 
 const WEB = app.isPackaged ? path.join(__dirname, "web") : path.join(__dirname, "..");
 const XTERM = path.relative(WEB, path.join(__dirname, "node_modules", "@xterm")).split(path.sep).join("/");
@@ -81,10 +88,11 @@ ipcMain.handle("term:open", (_e, { key, sessionId, cwd, cols, rows, shellOnly })
     while (rec.size > 400000 && rec.buf.length > 1) rec.size -= rec.buf.shift().length;
     send("term:data", key, d);
   });
-  p.onExit(({ exitCode }) => { terms.delete(key); send("term:exit", key, exitCode); });
+  // si ya se cerró a mano (o se abrió otra con la misma clave), este aviso llega tarde y no debe tocar la nueva
+  p.onExit(({ exitCode }) => { if (terms.get(key) !== rec) return; terms.delete(key); send("term:exit", key, exitCode); });
   return { pid: p.pid, reused: false, buffer: "" };
 });
-ipcMain.on("term:write", (_e, key, d) => { const t = terms.get(key); if (t) t.p.write(d); });
+ipcMain.on("term:write", (_e, key, d) => { const t = terms.get(key); if (t) { try { t.p.write(d); } catch { /* cerrándose */ } } });
 ipcMain.on("term:resize", (_e, key, c, r) => { const t = terms.get(key); if (t && c > 0 && r > 0) { try { t.p.resize(c, r); } catch { /* cerrado */ } } });
 ipcMain.on("term:kill", (_e, key) => { const t = terms.get(key); if (t) { try { t.p.kill(); } catch { /* ya cerrado */ } terms.delete(key); } });
 
@@ -93,6 +101,7 @@ ipcMain.on("data:sync", e => { e.returnValue = sesiones.readAll(); });
 ipcMain.handle("data:read", () => sesiones.readAll());
 
 // estado de las sesiones abiertas (Claude escribe ~/.claude/sessions/<pid>.json) y lo que guarda la barra de estado
+let lastEstado = {};
 function readLive() {
   const out = [];
   const dir = path.join(CLAUDE_DIR, "sessions");
@@ -102,8 +111,9 @@ function readLive() {
       try { const j = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")); out.push({ pid: j.pid, sessionId: j.sessionId, status: j.status, cwd: j.cwd, updatedAt: j.updatedAt }); } catch { /* escribiéndose */ }
     }
   } catch { /* no existe todavía */ }
-  let estado = {};
-  try { estado = JSON.parse(fs.readFileSync(ESTADO, "utf8")); } catch { /* aún sin datos */ }
+  // la barra de estado puede estar escribiendo el archivo justo ahora: entonces vale lo último bueno
+  let estado = lastEstado;
+  try { estado = lastEstado = JSON.parse(fs.readFileSync(ESTADO, "utf8")) || {}; } catch { /* aún sin datos o a medias */ }
   return { live: out, limits: estado.limits || null, context: estado.context || {} };
 }
 ipcMain.on("live:sync", e => { e.returnValue = readLive(); });
@@ -320,8 +330,8 @@ ipcMain.on("win:sync", e => { e.returnValue = win ? win.isFullScreen() : true; }
 
 function toggleWindow() {
   if (!win) return;
-  if (win.isVisible() && win.isFocused()) { win.hide(); return; }
-  win.show(); win.setFullScreen(true); win.focus(); send("palette");
+  if (win.isVisible() && win.isFocused()) { if (SHELL) toBack(); else win.hide(); return; } // como escritorio nunca se esconde
+  bringFront(); send("palette");
 }
 function registerShortcut() {
   globalShortcut.unregisterAll();
@@ -365,14 +375,14 @@ function createTray() {
   tray = new Tray(img);
   tray.setToolTip("Cúmulo");
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Abrir Cúmulo", click: () => { win.show(); win.setFullScreen(true); win.focus(); } },
+    { label: "Abrir Cúmulo", click: () => bringFront() },
     { type: "separator" },
     { label: "Salir (cierra las sesiones abiertas)", click: () => { app.isQuitting = true; app.quit(); } },
   ]));
-  tray.on("click", () => { win.show(); win.setFullScreen(true); win.focus(); });
+  tray.on("click", () => bringFront());
 }
 
-app.on("second-instance", () => { if (win) { win.show(); win.focus(); } });
+app.on("second-instance", () => bringFront());
 // ── barra de tareas siempre visible (solo como escritorio) ──────
 // Las apps maximizadas (Chrome…) ocupaban toda la pantalla y tapaban la barra de Cúmulo. Se reserva una franja
 // abajo (zona de trabajo de Windows) y ahí vive esta barra, encima de todo, mientras otra app está delante.
@@ -405,10 +415,10 @@ ipcMain.on("bar:cumulo", () => bringFront());
 
 // traer Cúmulo delante aunque otra app tenga el foco (Windows no deja robarlo sin este truco)
 function bringFront() {
-  if (!win) return;
+  if (!win || win.isDestroyed()) return;
   if (win.isMinimized()) win.restore();
   win.setAlwaysOnTop(true); win.show(); win.setFullScreen(true); win.focus();
-  setTimeout(() => { if (win) win.setAlwaysOnTop(false); }, 400);
+  setTimeout(() => { if (win && !win.isDestroyed()) win.setAlwaysOnTop(false); }, 400);
 }
 app.whenReady().then(async () => {
   if (SHELL && !process.env.CUMULO_DEV) ventanas.runStartup(log).catch(() => {});

@@ -576,7 +576,7 @@
     const d = plane.depth, sc = depthScale(d);
     const soft = d > 0.015;
     V = viewOf(plane);
-    if (soft && !shift && !busyNow && softCache.width === W && performance.now() - softAt < 700) {
+    if (soft && !shift && !busyNow && softCache.width === Math.floor(W * DPR) && softCache.height === Math.floor(H * DPR) && performance.now() - softAt < 700) {
       mainCtx.setTransform(1, 0, 0, 1, 0, 0); mainCtx.drawImage(softCache, 0, 0); mainCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
       ctx = mainCtx;
       return;
@@ -596,7 +596,9 @@
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
       ctx.globalCompositeOperation = "source-over";
       // se desenfoca una vez en la caché (a resolución de pantalla) y se pinta desde ahí
-      if (softCache.width !== W * DPR || softCache.height !== H * DPR) { softCache.width = W * DPR; softCache.height = H * DPR; }
+      // tamaño en píxeles enteros: con zoom de Windows (125 %…) W × DPR tiene decimales y antes se rehacía en cada fotograma
+      const cw = Math.floor(W * DPR), chh = Math.floor(H * DPR);
+      if (softCache.width !== cw || softCache.height !== chh) { softCache.width = cw; softCache.height = chh; }
       softCtx.setTransform(DPR, 0, 0, DPR, 0, 0); softCtx.clearRect(0, 0, W, H);
       softCtx.filter = `blur(${depthBlur(d).toFixed(2)}px) saturate(${lerp(1, 0.85, d).toFixed(2)})`;
       softCtx.globalAlpha = depthAlpha(d);
@@ -1551,6 +1553,7 @@
   function closeSession() {
     if (!sessionEl.classList.contains("open")) return;
     const s = current && current.s && !current.s.pseudo ? current.s : null;
+    labelHidden = null; // la etiqueta que viajó al entrar vuelve a dibujarse (salvo la que ahora vuelve volando)
     if (DESK && window.cumuloTerm) window.cumuloTerm.hide();
     if (streaming) {
       streaming.stop();
@@ -1628,7 +1631,7 @@
   function dockAdd(s, state = "") {
     let o = dockFind(s); if (o) return o;
     const el = document.createElement("button"); el.type = "button"; el.className = "dock-item";
-    el.style.setProperty("--cd", s.proj.cd); el.style.setProperty("--cl", s.proj.cl);
+    if (s.proj) { el.style.setProperty("--cd", s.proj.cd); el.style.setProperty("--cl", s.proj.cl); } // un terminal sin proyectos aún no tiene color
     el.dataset.kind = s.shell ? "shell" : s.plane.kind;
     el.innerHTML = `${ICONS[s.shell ? "code" : s.plane.kind]}<span class="t"></span><span class="st" aria-hidden="true"></span><span class="x" aria-label="Quitar de la barra"><svg class="ico" viewBox="0 0 16 16"><path d="M5 5l6 6M11 5l-6 6"/></svg></span>`;
     el.querySelector(".t").textContent = s.title;
@@ -1645,6 +1648,7 @@
     o.el.setAttribute("aria-label", o.s.title + why);
   }
   function dockRemove(o) {
+    if (!opened.includes(o)) return; // doble clic mientras se va: ya está quitada
     clearTimeout(o.timer);
     if (DESK && window.cumuloTerm) window.cumuloTerm.kill(o.s.termKey || o.s.id);
     opened.splice(opened.indexOf(o), 1);
@@ -1685,7 +1689,13 @@
   const ctxBtn = $("ctxCompact");
   ctxBtn.addEventListener("click", async () => {
     const m = window.cumuloMonitor;
-    if (DESK && current && current.s && window.cumuloTerm) { window.cumuloTerm.send(current.s.termKey || current.s.id, "/compact\r"); window.cumuloTerm.focus(); return; }
+    if (DESK && current && current.s && window.cumuloTerm) {
+      // la orden y el Intro por separado: juntos, Claude lo toma como texto pegado y no lo ejecuta
+      if (current.s.shell) return; // en un terminal de PowerShell no hay nada que compactar
+      const key = current.s.termKey || current.s.id;
+      window.cumuloTerm.send(key, "/compact"); setTimeout(() => window.cumuloTerm.send(key, "\r"), 250);
+      window.cumuloTerm.focus(); return;
+    }
     if (!m || ctxBtn.classList.contains("busy")) return;
     if (streaming) streaming.stop();
     const label = ctxBtn.querySelector("span");

@@ -4,7 +4,9 @@
 const { contextBridge, ipcRenderer } = require("electron");
 const path = require("path");
 
-const data = ipcRenderer.sendSync("data:sync");
+let data = { sessions: [], chats: [] };
+try { data = ipcRenderer.sendSync("data:sync") || data; } catch { /* sin sesiones legibles: el mapa sale vacío */ }
+data.sessions = data.sessions || []; data.chats = data.chats || [];
 let live = ipcRenderer.sendSync("live:sync");
 let sys = ipcRenderer.sendSync("sys:sync");
 
@@ -35,8 +37,11 @@ const hist = { session: [], weekly: [] };
 function limits() {
   const l = live.limits; if (!l) return null;
   const mk = (k, src, span) => {
-    if (!src) return { used: 0, start: Date.now() - span / 2, end: Date.now() + span / 2, history: [] };
-    const end = src.resets_at * 1000, start = end - span, used = Math.min(1, (src.used_percentage || 0) / 100);
+    if (!src || !(src.resets_at > 0)) return { used: 0, start: Date.now() - span / 2, end: Date.now() + span / 2, history: [] };
+    let end = src.resets_at * 1000, used = Math.min(1, Math.max(0, (src.used_percentage || 0) / 100));
+    // dato viejo de una ventana que ya se reinició (nadie ha usado Claude desde entonces): empieza de cero
+    if (end <= Date.now()) { while (end <= Date.now()) end += span; used = 0; }
+    const start = end - span;
     const h = hist[k];
     if (!h.length || h[0][0] !== start) { h.length = 0; h.push([start, 0]); }
     const now = Math.min(Date.now(), end);
@@ -46,7 +51,8 @@ function limits() {
   };
   return { session: mk("session", l.five_hour, 5 * H), weekly: mk("weekly", l.seven_day, 7 * 24 * H) };
 }
-if (live.limits) contextBridge.exposeInMainWorld("CUMULO_LIMITS", { read: () => limits() });
+// siempre se expone: si al abrir Cúmulo aún no hay datos, devuelve null hasta que la barra de estado los escriba
+contextBridge.exposeInMainWorld("CUMULO_LIMITS", { read: () => limits() });
 
 contextBridge.exposeInMainWorld("cumuloDesktop", {
   xtermDir: ipcRenderer.sendSync("app:paths").xterm,

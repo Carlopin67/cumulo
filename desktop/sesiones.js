@@ -1,6 +1,5 @@
 // Lee las sesiones reales de Claude Code (~/.claude/projects/<carpeta>/<id>.jsonl)
-// y las convierte al formato de window.CUMULO_DATA. Lo usan la app de escritorio
-// y el script `node desktop/generar-datos.js`.
+// y las convierte al formato de window.CUMULO_DATA. Lo usa la app de escritorio.
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -98,7 +97,8 @@ function readAll() {
   try { dirs = fs.readdirSync(ROOT, { withFileTypes: true }).filter(d => d.isDirectory()); } catch { return { sessions }; }
   for (const d of dirs) {
     const dir = path.join(ROOT, d.name);
-    for (const f of fs.readdirSync(dir)) {
+    let files = []; try { files = fs.readdirSync(dir); } catch { continue; } // carpeta sin permiso o borrándose
+    for (const f of files) {
       if (!f.endsWith(".jsonl")) continue;
       try { const s = readSession(path.join(dir, f)); if (s) sessions.push(s); } catch { /* sesión ilegible: se ignora */ }
     }

@@ -91,7 +91,7 @@
     xt.attachCustomKeyEventHandler(e => {
       if (e.type !== "keydown") return true;
       const k = e.key.toLowerCase();
-      if (e.ctrlKey && !e.altKey && k === "c" && xt.hasSelection()) { navigator.clipboard.writeText(xt.getSelection()); xt.clearSelection(); return false; }
+      if (e.ctrlKey && !e.altKey && k === "c" && xt.hasSelection()) { navigator.clipboard.writeText(xt.getSelection()).catch(() => {}); xt.clearSelection(); return false; }
       if (e.ctrlKey && !e.altKey && k === "v") {
         e.preventDefault();
         // texto tal cual; una imagen se guarda en un archivo y se pega su ruta (Claude la adjunta como imagen)
@@ -115,15 +115,22 @@
     return t;
   }
   async function start(t) {
-    const r = await D.term.open({ key: t.key, sessionId: t.sessionId, cwd: t.opts.cwd, shellOnly: t.opts.shell, cols: t.xt.cols, rows: t.xt.rows });
-    t.pid = r.pid; t.exited = false;
-    if (r.buffer) { t.xt.write(r.buffer); if (!t.opts.shell) sniff(t); }
+    if (t.starting) return; // Intro pulsado varias veces seguidas: un solo arranque
+    t.starting = true;
+    try {
+      const r = await D.term.open({ key: t.key, sessionId: t.sessionId, cwd: t.opts.cwd, shellOnly: t.opts.shell, cols: t.xt.cols, rows: t.xt.rows });
+      t.pid = r.pid; t.exited = false;
+      if (r.buffer) { t.xt.write(r.buffer); if (!t.opts.shell) sniff(t); }
+    } catch (e) {
+      t.exited = true;
+      t.xt.write("\r\n\x1b[31m— No se pudo abrir Claude aquí. Pulsa Intro para intentarlo otra vez.\x1b[0m\r\n");
+    } finally { t.starting = false; }
   }
   // modelo y esfuerzo leídos del texto que Claude tiene en pantalla: así el panel acierta desde el
   // principio y confirma al momento lo que eliges. Lo vivo manda: el pie («● high · /effort») y la
   // cabecera («Opus 5.5 with high effort»); si no se ven, el último «Set model/effort to…».
   const EF = "(low|medium|high|xhigh|max)", MD = "(Haiku|Sonnet|Opus|Fable)";
-  const RX_HEAD = new RegExp(MD + " \d+(?:\.\d+)? with " + EF + " effort");
+  const RX_HEAD = new RegExp(MD + " \\d+(?:\\.\\d+)? with " + EF + " effort");
   const RX_FOOT = new RegExp("[●◐◑◒◓○◉•] ?" + EF + " · /effort");
   const RX_SETM = new RegExp("(?:Set model to|Using) " + MD + " ", "g");
   const RX_SETE = new RegExp("effort level to " + EF, "g");
@@ -139,14 +146,14 @@
       const model = (head && head[1]) || last(RX_SETM);
       const effort = (foot && foot[1]) || (head && head[2]) || last(RX_SETE);
       const seen = t.seen || (t.seen = {}), now = Date.now();
-      const id = model && MODELS.find(x => x.name === model).id;
+      const mm = model && MODELS.find(x => x.name === model), id = mm && mm.id;
       let changed = false;
       if (id && id !== seen.model) { seen.model = id; seen.modelAt = now; changed = true; }
       if (effort && effort !== seen.effort) { seen.effort = effort; seen.effortAt = now; changed = true; }
       if (changed && t === active) claudeBox(t, t.ctx, t.busy ? "busy" : "idle");
     }, 500);
   }
-  function restart(t) { t.xt.clear(); start(t); }
+  function restart(t) { if (t.starting) return; t.xt.clear(); start(t); }
 
   // imagen del portapapeles → archivo temporal; devuelve su ruta (o null si no hay imagen)
   async function clipImage() {
@@ -308,21 +315,37 @@
     } else cbTip.textContent = "Se completa al primer mensaje de Claude.";
   }
 
+  // Abrir y cerrar sesiones deprisa: cada terminal se crea una sola vez aunque se pida dos veces mientras arranca,
+  // y si entretanto se ha cambiado de sesión o se ha vuelto al mapa, la que llega tarde no se pone delante.
+  const making = new Map(); // key → promesa de la terminal que se está creando
+  let showSeq = 0;
   window.cumuloTerm = {
     async show(key, opts) {
+      const my = ++showSeq;
       let t = terms.get(key);
       terms.forEach(o => { o.el.hidden = o !== t; });
-      if (!t) t = await make(key, opts);
+      if (!t) {
+        let p = making.get(key);
+        if (!p) { p = make(key, opts).finally(() => making.delete(key)); making.set(key, p); }
+        try { t = await p; } catch { return null; }
+      }
+      if (my !== showSeq || terms.get(key) !== t) { if (t.el) t.el.hidden = t !== active; return t; }
       terms.forEach(o => { o.el.hidden = o !== t; });
       active = t;
       if (!t.opts.shell) claudeBox(t, t.ctx, t.busy ? "busy" : "idle");
-      requestAnimationFrame(() => { fitNow(t); t.xt.focus(); });
+      requestAnimationFrame(() => { if (active === t) { fitNow(t); t.xt.focus(); } });
       return t;
     },
-    hide() { if (active) active.xt.blur(); active = null; },
+    hide() { showSeq++; if (active) active.xt.blur(); active = null; },
     focus() { if (active) active.xt.focus(); },
     has: key => terms.has(key),
-    kill(key) { const t = terms.get(key); if (!t) return; D.term.kill(key); D.term.off(key); t.xt.dispose(); t.el.remove(); terms.delete(key); if (active === t) active = null; },
+    kill(key) {
+      const p = making.get(key);
+      if (p) { p.then(() => window.cumuloTerm.kill(key), () => {}); return; } // aún arrancando: se cierra al terminar
+      const t = terms.get(key); if (!t) return;
+      D.term.kill(key); D.term.off(key); clearTimeout(t.sniffT); queued.delete(t); lastStatus.delete(key);
+      t.xt.dispose(); t.el.remove(); terms.delete(key); if (active === t) active = null;
+    },
     send(key, text) { D.term.write(key, text); },
     sessionId: key => (terms.get(key) || {}).sessionId,
     onStatus: f => statusFns.add(f),
