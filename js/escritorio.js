@@ -482,7 +482,8 @@
     cv.busy = false;
     if (!r || cv.id !== t.sessionId) return;
     if (r.reset) { cv.items = []; cv.shownFrom = 0; cv.list.textContent = ""; cv.st = null; }
-    if (!r.items.length) { cv.empty.hidden = !!cv.items.length; return; }
+    if (!r.items.length) { cv.empty.hidden = !!cv.items.length || !!cv.list.querySelector(".pending"); return; }
+    if (r.items.some(x => x.k === "u")) cv.list.querySelectorAll(".cv-user.pending").forEach(p => p.remove());
     const f = cv.feed, stick = f.scrollTop + f.clientHeight >= f.scrollHeight - 60 || !cv.items.length;
     const first = !cv.items.length;
     if (first) cv.pinUntil = Date.now() + 5000; // al abrir, abajo del todo aunque las imágenes tarden en cargar
@@ -586,6 +587,13 @@
       D.term.write(t.key, "\x05\x15"); // lo que hubiera a medias en la línea de Claude, fuera
       setTimeout(() => D.term.write(t.key, "\x1b[200~" + text + "\x1b[201~"), 80);
       setTimeout(() => D.term.write(t.key, "\r"), 380);
+      // el mensaje sale ya en el chat; cuando Claude lo apunta en su registro se cambia por el de verdad
+      const pend = document.createElement("section"); pend.className = "cv-user pending";
+      pend.append(head("Tú", new Date().toISOString()));
+      if (files.length) { const g = document.createElement("div"); g.className = "cv-imgs"; files.forEach(p => g.append(imgEl(fileUrl(p), ""))); pend.append(g); }
+      if (ta.value.trim()) { const p = document.createElement("div"); p.className = "cv-utext"; p.textContent = ta.value.trim(); pend.append(p); }
+      t.cv.list.append(pend); t.cv.empty.hidden = true;
+      [600, 1100, 1800].forEach(ms => setTimeout(() => feedTick(t), ms));
       ta.value = ""; files.length = 0; tray.textContent = ""; tray.hidden = true; autosize(); refresh();
       t.cv.pinUntil = Date.now() + 4000; t.cv.feed.scrollTop = t.cv.feed.scrollHeight;
     });
@@ -742,7 +750,17 @@
     const fit = () => { inp.style.height = "auto"; inp.style.height = Math.min(inp.scrollHeight, 160) + "px"; };
     inp.addEventListener("input", fit); fit();
   }
-  function checkQ(t) {
+  // la terminal de Claude solo sale si de verdad pide algo que no es encuesta: mientras redibuja entre
+  // pregunta y pregunta (o al contestar) la pantalla no se entiende un momento y no debe asomar
+  function askShow(t) {
+    const want = t.el.classList.contains("ask") && !t.el.classList.contains("qmode");
+    if (!want) { clearTimeout(t.askT); t.askT = 0; t.el.classList.remove("askshow"); return; }
+    if (t.qTerm) { t.el.classList.add("askshow"); return; }
+    if (t.el.classList.contains("askshow") || t.askT) return;
+    t.askT = setTimeout(() => { t.askT = 0; checkQ(t); if (t.el.classList.contains("ask") && !t.el.classList.contains("qmode")) t.el.classList.add("askshow"); }, 1300);
+  }
+  function checkQ(t) { checkQ0(t); if (t.el) askShow(t); }
+  function checkQ0(t) {
     if (!t.cv) return;
     const asking = t.status && t.status !== "busy" && t.status !== "idle";
     const q = asking && !t.qTerm && !t.readonly ? parseQ(screenText(t, 45)) : null;
