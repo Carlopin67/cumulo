@@ -989,3 +989,7 @@ html.raw-term .xt-ask-h { display: none !important; }
 .cv-qback:hover { color: var(--ink); background: var(--hover); }
 .cv-qok { flex: none; height: 28px; padding: 0 12px; border-radius: 8px; background: var(--hover); color: var(--ink-2); font: 500 12px var(--prose); }
 .cv-qok:hover { background: var(--accent); color: #141414; }
+.cv-qo-other textarea { flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: none; color: var(--ink); font: 13.5px/1.5 var(--prose); padding: 2px 0; max-height: 160px; }
+.cv-qo-other textarea::placeholder { color: var(--faint); }
+.cv-qo-other { grid-column: 1 / -1; }
+.cv-qtyped { grid-column: 1 / -1; }

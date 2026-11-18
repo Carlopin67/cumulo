@@ -629,6 +629,8 @@
   }
   // si lo que pregunta Claude es una encuesta, se contesta en una tarjeta y la terminal no sale.
   // La pregunta no está en el registro hasta que se responde: se lee de su pantalla.
+  // Filas: las opciones numeradas; la última antes de la raya es «Type something» (o lo ya escrito en ella);
+  // en las de varias, debajo está «Submit». El cursor (❯) dice dónde está Claude.
   function parseQ(text) {
     const L = text.split("\n").map(l => l.replace(/\s+$/, ""));
     let end = -1; for (let i = L.length - 1; i >= 0; i--) if (/Enter to select|Submit answers/.test(L[i])) { end = i; break; }
@@ -642,41 +644,79 @@
       const sum = body.filter(l => /^\s*(●|→)/.test(l)).map(l => l.trim());
       return { review: true, sum, steps, doneSteps };
     }
-    let title = "", opts = [], other = 0, multi = false;
+    let title = "", rows = [], multi = false, submit = false, cursor = -1, closed = false;
     for (const l of body) {
-      if (/^─+$/.test(l.trim()) || /Enter to select/.test(l)) continue;
-      const m = /^\s*(?:❯\s*)?(\d+)\.\s+(?:\[([ ✔])\]\s+)?(.*)$/.exec(l);
+      if (/Enter to select/.test(l)) break;
+      if (/^\s*─{5,}/.test(l)) { if (rows.length) closed = true; continue; }
+      if (closed) continue; // «Chat about this» y lo de debajo
+      const m = /^\s*(❯)?\s*(\d+)\.\s+(?:\[([ ✔])\]\s+)?(.*)$/.exec(l);
       if (m) {
-        const label = m[3].trim();
-        if (m[2] !== undefined) multi = true;
-        if (/^Type something/.test(label)) { other = +m[1]; continue; }
-        if (/^Chat about this/.test(label)) continue;
-        opts.push({ n: +m[1], label, on: m[2] === "✔", desc: "" });
+        if (m[3] !== undefined) multi = true;
+        if (m[1]) cursor = rows.length;
+        rows.push({ n: +m[2], label: m[4].trim(), on: m[3] === "✔", desc: "" });
         continue;
       }
-      if (!l.trim() || /^\s*Submit\s*$/.test(l)) continue;
-      if (!opts.length) { if (!title) title = l.trim(); else if (!other) title += " " + l.trim(); }
-      else if (!other && /^\s{4,}/.test(l)) opts[opts.length - 1].desc += (opts[opts.length - 1].desc ? " " : "") + l.trim();
+      const sm = /^\s*(❯)?\s*Submit\s*$/.exec(l);
+      if (sm) { submit = true; if (sm[1]) cursor = rows.length; continue; }
+      if (!l.trim()) continue;
+      if (!rows.length) title += (title ? " " : "") + l.trim();
+      else if (/^\s{4,}/.test(l)) rows[rows.length - 1].desc += (rows[rows.length - 1].desc ? " " : "") + l.trim();
     }
-    if (!opts.length) return null;
-    return { title, opts, other, multi, steps, doneSteps, last: steps <= 1 || doneSteps >= steps - 1 };
+    if (rows.length < 2) return null;
+    const o = rows.pop(); // la última fila es la respuesta libre
+    const typed = /^Type something\.?$/.test(o.label) ? "" : o.label;
+    return { title, opts: rows, other: o.n, otherOn: o.on, typed, multi, submit, cursor, otherRow: rows.length, submitRow: rows.length + 1,
+      steps, doneSteps, last: steps <= 1 || doneSteps >= steps - 1 };
+  }
+  const DRAFT = "cumulo-encuesta-borrador";
+  const draftGet = () => { try { return JSON.parse(localStorage.getItem(DRAFT) || "{}"); } catch { return {}; } };
+  const draftSet = (title, v) => { try { const d = draftGet(); if (v) d[title] = v; else delete d[title]; localStorage.setItem(DRAFT, JSON.stringify(d)); } catch { /* sin almacenamiento */ } };
+  // lleva el cursor de Claude a una fila (flechas), mirando la pantalla para no pasarse
+  async function moveTo(t, row) {
+    for (let k = 0; k < 12; k++) {
+      const q = parseQ(screenText(t, 45)); if (!q || q.review) return q;
+      if (q.cursor === row) return q;
+      D.term.write(t.key, q.cursor < row ? "\x1b[B" : "\x1b[A");
+      await sleep(140);
+    }
+    return parseQ(screenText(t, 45));
   }
   function liveQCard(t) {
     if (t.cv.qcard) return t.cv.qcard;
     const c = document.createElement("div"); c.className = "cv-q cv-qlive";
+    const K = d => D.term.write(t.key, d);
+    const run = async f => {
+      if (c.classList.contains("sending")) return;
+      c.classList.add("sending");
+      try { await f(); } catch { /* se vuelve a leer la pantalla */ }
+      await sleep(350); c.classList.remove("sending"); checkQ(t);
+    };
     c.addEventListener("click", e => {
-      const b = e.target.closest("[data-k]"); if (!b || c.classList.contains("sending")) return;
-      const K = d => D.term.write(t.key, d);
-      const k = b.dataset.k;
+      const b = e.target.closest("[data-k]"); if (!b) return;
+      const k = b.dataset.k, q = t.cv.q; if (!q) return;
       if (k === "term") { t.qTerm = true; t.el.classList.remove("qmode"); focusT(t); return; }
       if (k === "other") {
-        const v = c.querySelector(".cv-qo-other input").value.trim(); if (!v) return;
-        const q = t.cv.q; K(String(q.other));
-        setTimeout(() => { K(v); setTimeout(() => K(q.multi ? "\t" : "\r"), 260); }, 260);
-      } else K(k);
-      c.classList.add("sending"); setTimeout(() => { c.classList.remove("sending"); checkQ(t); }, 700);
+        const inp = c.querySelector(".cv-qo-other textarea"); const v = inp.value.replace(/\s*\n\s*/g, " ").trim(); if (!v) return;
+        run(async () => {
+          if (q.multi) {
+            if (!q.otherOn) { K(String(q.other)); await sleep(250); }
+            await moveTo(t, q.otherRow);
+            if (q.typed) { K("\x7f".repeat(q.typed.length + 2)); await sleep(150); } // lo escrito antes, fuera
+            K(v); await sleep(300);
+            const r = parseQ(screenText(t, 45));
+            if (r && !r.review && r.typed) { draftSet(q.title, ""); inp.value = ""; } // ya está en Claude: el borrador sobra
+          } else {
+            K(String(q.other)); await sleep(300); K(v); await sleep(300); K("\r"); draftSet(q.title, "");
+          }
+        });
+        return;
+      }
+      if (k === "next") { run(async () => { await moveTo(t, q.submitRow); await sleep(120); K("\r"); }); return; }
+      // si el cursor está en la respuesta libre, el número se escribiría dentro: antes se sale de ella
+      run(async () => { const f = parseQ(screenText(t, 45)); if (q.multi && f && f.cursor === f.otherRow) await moveTo(t, 0); K(k); await sleep(200); });
     });
-    c.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches(".cv-qo-other input")) { e.preventDefault(); c.querySelector('[data-k="other"]').click(); } });
+    c.addEventListener("input", e => { if (e.target.matches(".cv-qo-other textarea") && t.cv.q) draftSet(t.cv.q.title, e.target.value); });
+    c.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches(".cv-qo-other textarea")) { e.preventDefault(); c.querySelector('[data-k="other"]').click(); } });
     t.cv.qcard = c; return c;
   }
   function paintQ(t, q) {
@@ -690,12 +730,17 @@
         <div class="cv-qbar"><button type="button" class="cv-qterm" data-k="term">Ver en la terminal</button><span class="cv-qfoot"></span><button type="button" class="cv-qback" data-k="2">Cancelar</button><button type="button" class="cv-qsend" data-k="1">Enviar respuestas</button></div>`;
       return;
     }
-    const keep = c.querySelector(".cv-qo-other input"), typed = keep ? keep.value : "";
+    const keep = c.querySelector(".cv-qo-other textarea");
+    const typed = (keep && keep.value) || draftGet()[q.title] || "";
     c.innerHTML = `<div class="cv-qi${q.multi ? " multi" : ""}"><p class="cv-qh"><span class="cv-qtag">Claude te pregunta</span>${step}<b>${esc2(q.title)}</b><small class="cv-qkind">${q.multi ? "Puedes elegir varias" : "Pulsa una opción"}</small></p>
       <div class="cv-qopts">${q.opts.map(o => `<button type="button" class="cv-qo${o.on ? " on" : ""}" data-k="${o.n}"><span class="cv-qmark"></span><span class="cv-qt"><b>${esc2(o.label)}</b>${o.desc ? `<small>${esc2(o.desc)}</small>` : ""}</span></button>`).join("")}
-      ${q.other ? `<label class="cv-qo cv-qo-other"><span class="cv-qmark"></span><input type="text" placeholder="Otra respuesta…" spellcheck="false"><button type="button" class="cv-qok" data-k="other">${q.multi ? "Añadir" : "Enviar"}</button></label>` : ""}</div></div>
-      <div class="cv-qbar"><button type="button" class="cv-qterm" data-k="term">Ver en la terminal</button><span class="cv-qfoot"></span>${q.multi ? `<button type="button" class="cv-qsend" data-k="\t">${q.last ? "Revisar y enviar" : "Siguiente"}</button>` : ""}</div>`;
-    const inp = c.querySelector(".cv-qo-other input"); if (inp) inp.value = typed;
+      ${q.typed ? `<div class="cv-qo on cv-qtyped"><span class="cv-qmark"></span><span class="cv-qt"><b>${esc2(q.typed)}</b><small>Tu respuesta</small></span></div>` : ""}
+      <label class="cv-qo cv-qo-other"><span class="cv-qmark"></span><textarea rows="1" placeholder="${q.typed ? "Cambiar tu respuesta…" : "Otra respuesta…"}" spellcheck="false"></textarea><button type="button" class="cv-qok" data-k="other">${q.multi ? "Añadir" : "Enviar"}</button></label></div></div>
+      <div class="cv-qbar"><button type="button" class="cv-qterm" data-k="term">Ver en la terminal</button><span class="cv-qfoot">Lo que escribas se guarda aunque se cierre</span>${q.multi ? `<button type="button" class="cv-qsend" data-k="next">${q.last ? "Revisar y enviar" : "Siguiente"}</button>` : ""}</div>`;
+    const inp = c.querySelector(".cv-qo-other textarea");
+    inp.value = typed;
+    const fit = () => { inp.style.height = "auto"; inp.style.height = Math.min(inp.scrollHeight, 160) + "px"; };
+    inp.addEventListener("input", fit); fit();
   }
   function checkQ(t) {
     if (!t.cv) return;
@@ -704,7 +749,9 @@
     t.el.classList.toggle("qmode", !!q);
     t.cv.q = q;
     if (!q) { if (t.cv.qcard) { t.cv.qcard.remove(); t.cv.qcard.dataset.sig = ""; } return; }
+    if (t.cv.qcard && t.cv.qcard.contains(document.activeElement) && document.activeElement.matches("textarea") && t.cv.qcard.dataset.title === (q.title || "")) return; // escribiendo: no se repinta
     paintQ(t, q);
+    t.cv.qcard.dataset.title = q.title || "";
     const f = t.cv.feed, col = f.querySelector(".cv-col");
     if (t.cv.qcard.parentNode !== col) { col.insertBefore(t.cv.qcard, t.cv.work); f.scrollTop = f.scrollHeight; }
   }
