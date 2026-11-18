@@ -69,10 +69,19 @@ function read(root, id) {
       fs.readSync(fd, buf, 0, buf.length, t.pos); fs.closeSync(fd); t.pos = size;
       const lines = (t.rest + buf.toString("utf8")).split("\n"); t.rest = lines.pop();
       for (const line of lines) {
-        if (!line.includes('"type":"user"') && !line.includes('"type":"assistant"')) continue;
+        const queued = line.includes('"type":"queued_command"');
+        if (!queued && !line.includes('"type":"user"') && !line.includes('"type":"assistant"')) continue;
         let o; try { o = JSON.parse(line); } catch { continue; }
         if (o.isSidechain) continue;
         const at = o.timestamp || null;
+        // lo que escribiste mientras Claude trabajaba: no se guarda como mensaje tuyo, sino como añadido a su turno
+        if (o.type === "attachment") {
+          const a = o.attachment;
+          if (a && a.type === "queued_command" && a.commandMode === "prompt" && (!a.origin || a.origin.kind === "human") && typeof a.prompt === "string") {
+            const u = userItem({ message: { content: a.prompt } }); if (u) { u.at = at; t.items.push(u); }
+          }
+          continue;
+        }
         if (o.type === "user") {
           // la respuesta a una pregunta con opciones (AskUserQuestion)
           const ans = o.toolUseResult && o.toolUseResult.answers;

@@ -818,6 +818,8 @@ html.raw-term .xt-ask-h { display: none !important; }
 .cv-user .cv-imgs { display: flex; flex-wrap: wrap; gap: 10px; padding-left: 18px; margin-bottom: 10px; }
 .cv-user .cv-imgs .cv-img img { max-height: 120px; max-width: 220px; }
 .cv-user.pending .cv-head time::after { content: " · enviando"; }
+.cv-user.pending.queued .cv-head time::after { content: " · en cola"; color: var(--warn); }
+.cv-user.pending.queued .cv-utext { opacity: .7; }
 
 /* Claude */
 .cv-claude { padding: 22px 0 30px; }
@@ -982,6 +984,8 @@ html.raw-term .xt-ask-h { display: none !important; }
 /* encuesta en vivo (leída de la pantalla de Claude) */
 .cv-qlive { margin: 6px 0 18px; border-color: color-mix(in srgb, var(--accent) 50%, var(--line-2)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent); animation: askIn .35s var(--ease-out); }
 .cv-qlive.sending { opacity: .7; pointer-events: none; }
+.cv-qlive.sent { opacity: .6; pointer-events: none; animation: none; }
+.cv-qctx { margin: 4px 0 10px; padding: 8px 10px; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 11.5px/1.5 var(--mono, ui-monospace, monospace); color: var(--muted, inherit); background: color-mix(in srgb, var(--line-2) 35%, transparent); border-radius: 6px; }
 .cv-qstep { font-size: 10px; color: var(--faint); }
 .cv-qsum { display: grid; gap: 2px; }
 .cv-qsum .q { font: 13px/1.5 var(--prose); color: var(--muted); margin-top: 8px; }

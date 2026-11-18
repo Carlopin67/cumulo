@@ -92,6 +92,8 @@
     const t = { key, xt, fit, el, live, pid: 0, sessionId: opts.sessionId || null, exited: false, opts, createdAt: Date.now() };
     if (!opts.shell) {
       el.prepend(makeFeed(t)); el.append(makeComposer(t));
+      // una sesión que ya existe: la conversación se lee ya, sin esperar a que arranque Claude
+      if (t.sessionId) { t.cv.empty.hidden = true; feedTick(t); }
       const h = document.createElement("p"); h.className = "xt-ask-h"; h.textContent = "Claude necesita tu respuesta · contesta aquí con el teclado"; live.append(h);
     }
     new ResizeObserver(() => { if (t === active) fitNow(t); }).observe(live);
@@ -457,6 +459,9 @@
       }
     });
     if (prepend) t.cv.list.prepend(frag); else { t.cv.list.append(frag); t.cv.st = st; }
+    // la encuesta ya contestada llega al registro: la tarjeta en vivo que esperaba se va sin dejar hueco
+    const lc = t.cv.qcard;
+    if (!prepend && lc && lc.classList.contains("sent") && list.some(x => x.k === "q")) { lc.remove(); lc.dataset.sig = ""; lc.classList.remove("sent"); }
   }
   const PAGE = 300; // se pintan las últimas; las anteriores, al pedirlas
   function makeFeed(t) {
@@ -476,14 +481,24 @@
     if (!t || !t.cv || t.opts.shell || !D.sessFeed) return;
     const cv = t.cv;
     if (!t.sessionId || cv.busy) return;
-    if (cv.id !== t.sessionId) { cv.id = t.sessionId; cv.items = []; cv.shownFrom = 0; cv.list.textContent = ""; cv.st = null; }
+    // vaciar sin perder lo que acabas de mandar (en una sesión nueva el id llega después del primer mensaje)
+    const wipe = () => { const keep = [...cv.list.querySelectorAll(".cv-user.pending")]; cv.items = []; cv.shownFrom = 0; cv.list.textContent = ""; cv.st = null; cv.list.append(...keep); };
+    if (cv.id !== t.sessionId) { cv.id = t.sessionId; wipe(); }
     cv.busy = true;
     let r = null; try { r = await D.sessFeed(t.sessionId, cv.items.length); } catch { /* sin datos */ }
     cv.busy = false;
     if (!r || cv.id !== t.sessionId) return;
-    if (r.reset) { cv.items = []; cv.shownFrom = 0; cv.list.textContent = ""; cv.st = null; }
+    if (r.reset) wipe();
     if (!r.items.length) { cv.empty.hidden = !!cv.items.length || !!cv.list.querySelector(".pending"); return; }
-    if (r.items.some(x => x.k === "u")) cv.list.querySelectorAll(".cv-user.pending").forEach(p => p.remove());
+    // cada mensaje tuyo que llega al registro quita su copia provisional: la que coincide en texto o, si
+    // Claude lo guardó cambiado (texto pegado largo, solo imagen…), la más antigua mandada antes que él
+    r.items.filter(x => x.k === "u").forEach(x => {
+      const ps = [...cv.list.querySelectorAll(".cv-user.pending")]; if (!ps.length) return;
+      const at = x.at ? Date.parse(x.at) : NaN;
+      const oldest = ps[0], sentAt = +oldest.dataset.at || 0;
+      const p = ps.find(p => p.dataset.text && (x.text || "").includes(p.dataset.text)) || (isNaN(at) || at >= sentAt - 3000 ? oldest : null);
+      if (p) p.remove();
+    });
     const f = cv.feed, stick = f.scrollTop + f.clientHeight >= f.scrollHeight - 60 || !cv.items.length;
     const first = !cv.items.length;
     if (first) cv.pinUntil = Date.now() + 5000; // al abrir, abajo del todo aunque las imágenes tarden en cargar
@@ -493,6 +508,8 @@
       cv.more.hidden = false; cv.more.textContent = `Ver ${Math.min(PAGE, cv.shownFrom)} anteriores`;
       renderItems(t, cv.items.slice(cv.shownFrom));
     } else renderItems(t, r.items);
+    // lo que mandaste y aún no ha llegado sigue abajo del todo, debajo de lo que Claude va escribiendo
+    const still = cv.list.querySelectorAll(".cv-user.pending"); if (still.length) cv.list.append(...still);
     cv.empty.hidden = true;
     if (stick) {
       f.scrollTop = f.scrollHeight;
@@ -537,8 +554,8 @@
         <div class="cv-bar">
           <label class="cv-btn" title="Adjuntar imágenes (también puedes pegarlas o arrastrarlas)">${IC.clip}<span>Imagen</span><input type="file" accept="image/*" multiple hidden></label>
           <span class="cv-state"></span>
-          <span class="cv-keys"><span class="k-send"><kbd>Ctrl</kbd><kbd>↵</kbd> enviar</span><span class="k-stop"><kbd>Esc</kbd> parar</span></span>
-          <button type="submit" class="cv-send" title="Enviar (Ctrl+Intro)" aria-label="Enviar">${IC.send}${IC.stop}</button>
+          <span class="cv-keys"><span class="k-send"><kbd>↵</kbd> enviar · <kbd>Ctrl</kbd><kbd>↵</kbd> salto</span><span class="k-stop"><kbd>Esc</kbd> parar</span></span>
+          <button type="submit" class="cv-send" title="Enviar (Intro)" aria-label="Enviar">${IC.send}${IC.stop}</button>
         </div>
       </div>`;
     const ta = c.querySelector("textarea"), tray = c.querySelector(".cv-tray"), file = c.querySelector("input[type=file]"), sendB = c.querySelector(".cv-send");
@@ -548,7 +565,7 @@
       const busy = t.status === "busy";
       c.classList.toggle("busy", busy && !ta.value.trim() && !files.length);
       sendB.disabled = !t.readonly && !busy && !ta.value.trim() && !files.length;
-      sendB.title = t.readonly ? "Volver a intentar abrirla aquí" : c.classList.contains("busy") ? "Parar (Esc)" : "Enviar (Ctrl+Intro)";
+      sendB.title = t.readonly ? "Volver a intentar abrirla aquí" : c.classList.contains("busy") ? "Parar (Esc)" : "Enviar (Intro)";
     };
     const addPath = p => {
       if (!p) return;
@@ -575,7 +592,13 @@
     });
     ta.addEventListener("input", () => { autosize(); refresh(); });
     ta.addEventListener("keydown", e => {
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); c.requestSubmit(); }
+      if (e.key === "Enter" && !e.isComposing) {
+        // Intro envía; Ctrl+Intro (o Mayús+Intro) hace un salto de línea
+        if (e.shiftKey) return; // el salto lo pone el propio cuadro
+        e.preventDefault();
+        if (e.ctrlKey || e.metaKey) { ta.setRangeText("\n", ta.selectionStart, ta.selectionEnd, "end"); autosize(); refresh(); }
+        else c.requestSubmit();
+      }
       else if (e.key === "Escape" && t.status === "busy") { e.preventDefault(); e.stopPropagation(); D.term.write(t.key, "\x1b"); }
     });
     c.addEventListener("submit", e => {
@@ -589,7 +612,8 @@
       setTimeout(() => D.term.write(t.key, "\r"), 380);
       t.qSent = Date.now();
       // el mensaje sale ya en el chat; cuando Claude lo apunta en su registro se cambia por el de verdad
-      const pend = document.createElement("section"); pend.className = "cv-user pending";
+      const pend = document.createElement("section"); pend.className = "cv-user pending" + (t.status === "busy" ? " queued" : "");
+      pend.dataset.text = ta.value.trim().slice(0, 60); pend.dataset.at = Date.now();
       pend.append(head("Tú", new Date().toISOString()));
       if (files.length) { const g = document.createElement("div"); g.className = "cv-imgs"; files.forEach(p => g.append(imgEl(fileUrl(p), ""))); pend.append(g); }
       if (ta.value.trim()) { const p = document.createElement("div"); p.className = "cv-utext"; p.textContent = ta.value.trim(); pend.append(p); }
@@ -677,6 +701,30 @@
     return { title, opts: rows, other: o.n, otherOn: o.on, typed, multi, submit, cursor, otherRow: rows.length, submitRow: rows.length + 1,
       steps, doneSteps, last: steps <= 1 || doneSteps >= steps - 1 };
   }
+  // permisos («Allow this read…?», «Do you want to proceed?»): opciones numeradas y debajo «Esc to cancel».
+  // Encima, el recuadro con lo que quiere hacer (herramienta, ruta, orden…), que se enseña tal cual.
+  function parseP(text) {
+    const L = text.split("\n").map(l => l.replace(/\s+$/, ""));
+    let end = -1; for (let i = L.length - 1; i >= 0; i--) if (/Esc to cancel/.test(L[i])) { end = i; break; }
+    if (end < 0 || L.slice(end + 1).some(l => /^\s*(❯\s*)?\d+\.\s/.test(l))) return null;
+    const opts = []; let cursor = -1, i = end - 1;
+    for (; i >= 0; i--) {
+      const l = L[i];
+      const m = /^\s*(❯)?\s*(\d+)\.\s+(.*)$/.exec(l);
+      if (m) { opts.unshift({ n: +m[2], label: m[3].trim(), desc: "", cur: !!m[1] }); continue; }
+      if (!l.trim() || (opts.length && /^\s{4,}/.test(l))) { if (opts.length && l.trim()) opts[0].desc += (opts[0].desc ? " " : "") + l.trim(); continue; }
+      break;
+    }
+    if (opts.length < 2 || opts[0].n !== 1) return null;
+    opts.forEach((o, k) => { if (o.cur) cursor = k; delete o.cur; });
+    let title = "", qi = -1;
+    for (let k = i; k >= Math.max(0, i - 3); k--) if (/\?\s*$/.test(L[k])) { title = L[k].trim(); qi = k; break; }
+    let top = qi >= 0 ? qi - 1 : i; const ctx = [];
+    for (let k = top; k >= 0 && ctx.length < 14; k--) { if (/^\s*[─━╌]{5,}/.test(L[k])) break; ctx.unshift(L[k].replace(/^\s*[│┃]\s?|\s?[│┃]\s*$/g, "")); }
+    while (ctx.length && !ctx[0].trim()) ctx.shift();
+    while (ctx.length && !ctx[ctx.length - 1].trim()) ctx.pop();
+    return { perm: true, title: title || "Claude pide permiso", ctx: ctx.join("\n"), opts, cursor };
+  }
   const DRAFT = "cumulo-encuesta-borrador";
   const draftGet = () => { try { return JSON.parse(localStorage.getItem(DRAFT) || "{}"); } catch { return {}; } };
   const draftSet = (title, v) => { try { const d = draftGet(); if (v) d[title] = v; else delete d[title]; localStorage.setItem(DRAFT, JSON.stringify(d)); } catch { /* sin almacenamiento */ } };
@@ -690,6 +738,7 @@
     }
     return parseQ(screenText(t, 45));
   }
+  const q0 = t => t.cv && t.cv.q;
   function liveQCard(t) {
     if (t.cv.qcard) return t.cv.qcard;
     const c = document.createElement("div"); c.className = "cv-q cv-qlive";
@@ -704,34 +753,48 @@
       const b = e.target.closest("[data-k]"); if (!b) return;
       const k = b.dataset.k, q = t.cv.q; if (!q) return;
       if (k === "term") { t.qTerm = true; t.el.classList.remove("qmode"); focusT(t); return; }
-      if (k === "other") {
-        const inp = c.querySelector(".cv-qo-other textarea"); const v = inp.value.replace(/\s*\n\s*/g, " ").trim(); if (!v) return;
+      const sel = () => (t.cv.qsel = t.cv.qsel && t.cv.qsel.title === q.title ? t.cv.qsel : { title: q.title, on: new Set(q.opts.filter(o => o.on).map(o => o.n)) });
+      const text = () => { const i = c.querySelector(".cv-qo-other textarea"); return i ? i.value.replace(/\s*\n\s*/g, " ").trim() : ""; };
+      if (q.multi && /^\d+$/.test(k)) { // solo se marca aquí; se manda todo junto al pulsar el botón
+        const S = sel().on, n = +k; S.has(n) ? S.delete(n) : S.add(n); b.classList.toggle("on", S.has(n)); return;
+      }
+      if (k === "other" || k === "next") {
+        const v = text();
+        if (!q.multi) { if (!v) return; run(async () => { K(String(q.other)); await sleep(300); K(v); await sleep(300); K("\r"); draftSet(q.title, ""); t.qAuto = Date.now(); }); return; }
+        const S = sel().on;
         run(async () => {
-          if (q.multi) {
-            if (!q.otherOn) { K(String(q.other)); await sleep(250); }
-            await moveTo(t, q.otherRow);
-            if (q.typed) { K("\x7f".repeat(q.typed.length + 2)); await sleep(150); } // lo escrito antes, fuera
-            K(v); await sleep(300);
-            const r = parseQ(screenText(t, 45));
-            if (r && !r.review && r.typed) { draftSet(q.title, ""); inp.value = ""; } // ya está en Claude: el borrador sobra
-          } else {
-            K(String(q.other)); await sleep(300); K(v); await sleep(300); K("\r"); draftSet(q.title, "");
-          }
+          let f = parseQ(screenText(t, 45)); if (!f || f.review) return;
+          if (f.cursor === f.otherRow) f = await moveTo(t, 0) || f; // con el cursor en el texto, los números se escribirían dentro
+          for (const o of f.opts) if (o.on !== S.has(o.n)) { K(String(o.n)); await sleep(120); }
+          if (v && v !== f.typed) {
+            if (!f.otherOn) { K(String(f.other)); await sleep(200); }
+            await moveTo(t, f.otherRow);
+            if (f.typed) { K("\x7f".repeat(f.typed.length + 2)); await sleep(120); }
+            K(v); await sleep(250);
+          } else if (!v && f.otherOn) { K(String(f.other)); await sleep(150); }
+          await moveTo(t, f.submitRow); await sleep(120); K("\r");
+          draftSet(q.title, ""); t.cv.qsel = null; t.qAuto = Date.now();
         });
         return;
       }
-      if (k === "next") { run(async () => { await moveTo(t, q.submitRow); await sleep(120); K("\r"); }); return; }
-      // si el cursor está en la respuesta libre, el número se escribiría dentro: antes se sale de ella
-      run(async () => { const f = parseQ(screenText(t, 45)); if (q.multi && f && f.cursor === f.otherRow) await moveTo(t, 0); K(k); await sleep(200); });
+      run(async () => { K(k); await sleep(200); t.qAuto = Date.now(); });
     });
     c.addEventListener("input", e => { if (e.target.matches(".cv-qo-other textarea") && t.cv.q) draftSet(t.cv.q.title, e.target.value); });
-    c.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches(".cv-qo-other textarea")) { e.preventDefault(); c.querySelector('[data-k="other"]').click(); } });
+    c.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches(".cv-qo-other textarea")) { e.preventDefault(); c.querySelector(q0(t) && t.cv.q.multi ? '[data-k="next"]' : '[data-k="other"]').click(); } });
     t.cv.qcard = c; return c;
   }
   function paintQ(t, q) {
     const c = liveQCard(t), sig = JSON.stringify(q);
+    c.classList.toggle("perm", !!q.perm);
     if (c.dataset.sig === sig) return; c.dataset.sig = sig;
     const esc2 = s => esc(String(s || ""));
+    if (q.perm) {
+      c.innerHTML = `<div class="cv-qi cv-qperm"><p class="cv-qh"><span class="cv-qtag">Claude pide permiso</span><b>${esc2(q.title)}</b></p>
+        ${q.ctx ? `<pre class="cv-qctx">${esc2(q.ctx)}</pre>` : ""}
+        <div class="cv-qopts">${q.opts.map(o => `<button type="button" class="cv-qo" data-k="${o.n}"><span class="cv-qmark"></span><span class="cv-qt"><b>${esc2(o.label)}</b>${o.desc ? `<small>${esc2(o.desc)}</small>` : ""}</span></button>`).join("")}</div></div>
+        <div class="cv-qbar"><button type="button" class="cv-qterm" data-k="term">Ver en la terminal</button><span class="cv-qfoot">Pulsa una opción</span></div>`;
+      return;
+    }
     const step = q.steps > 1 ? `<span class="cv-qstep">Pregunta ${Math.min(q.doneSteps + 1, q.steps)} de ${q.steps}</span>` : "";
     if (q.review) {
       c.innerHTML = `<div class="cv-qi"><p class="cv-qh"><span class="cv-qtag">Revisa tus respuestas</span></p>
@@ -739,13 +802,14 @@
         <div class="cv-qbar"><button type="button" class="cv-qterm" data-k="term">Ver en la terminal</button><span class="cv-qfoot"></span><button type="button" class="cv-qback" data-k="2">Cancelar</button><button type="button" class="cv-qsend" data-k="1">Enviar respuestas</button></div>`;
       return;
     }
+    const L = t.cv.qsel && t.cv.qsel.title === q.title ? t.cv.qsel.on : null;
+    const isOn = o => L ? L.has(o.n) : o.on;
     const keep = c.querySelector(".cv-qo-other textarea");
-    const typed = (keep && keep.value) || draftGet()[q.title] || "";
+    const typed = (keep && keep.value) || draftGet()[q.title] || q.typed || "";
     c.innerHTML = `<div class="cv-qi${q.multi ? " multi" : ""}"><p class="cv-qh"><span class="cv-qtag">Claude te pregunta</span>${step}<b>${esc2(q.title)}</b><small class="cv-qkind">${q.multi ? "Puedes elegir varias" : "Pulsa una opción"}</small></p>
-      <div class="cv-qopts">${q.opts.map(o => `<button type="button" class="cv-qo${o.on ? " on" : ""}" data-k="${o.n}"><span class="cv-qmark"></span><span class="cv-qt"><b>${esc2(o.label)}</b>${o.desc ? `<small>${esc2(o.desc)}</small>` : ""}</span></button>`).join("")}
-      ${q.typed ? `<div class="cv-qo on cv-qtyped"><span class="cv-qmark"></span><span class="cv-qt"><b>${esc2(q.typed)}</b><small>Tu respuesta</small></span></div>` : ""}
-      <label class="cv-qo cv-qo-other"><span class="cv-qmark"></span><textarea rows="1" placeholder="${q.typed ? "Cambiar tu respuesta…" : "Otra respuesta…"}" spellcheck="false"></textarea><button type="button" class="cv-qok" data-k="other">${q.multi ? "Añadir" : "Enviar"}</button></label></div></div>
-      <div class="cv-qbar"><button type="button" class="cv-qterm" data-k="term">Ver en la terminal</button><span class="cv-qfoot">Lo que escribas se guarda aunque se cierre</span>${q.multi ? `<button type="button" class="cv-qsend" data-k="next">${q.last ? "Revisar y enviar" : "Siguiente"}</button>` : ""}</div>`;
+      <div class="cv-qopts">${q.opts.map(o => `<button type="button" class="cv-qo${isOn(o) ? " on" : ""}" data-k="${o.n}"><span class="cv-qmark"></span><span class="cv-qt"><b>${esc2(o.label)}</b>${o.desc ? `<small>${esc2(o.desc)}</small>` : ""}</span></button>`).join("")}
+      <label class="cv-qo cv-qo-other"><span class="cv-qmark"></span><textarea rows="1" placeholder="Otra respuesta…" spellcheck="false"></textarea>${q.multi ? "" : `<button type="button" class="cv-qok" data-k="other">Enviar</button>`}</label></div></div>
+      <div class="cv-qbar"><button type="button" class="cv-qterm" data-k="term">Ver en la terminal</button><span class="cv-qfoot">${q.multi ? "Intro también envía" : "Pulsa una opción y listo"}</span>${q.multi ? `<button type="button" class="cv-qsend" data-k="next">${q.last ? "Enviar" : "Siguiente"}</button>` : ""}</div>`;
     const inp = c.querySelector(".cv-qo-other textarea");
     inp.value = typed;
     const fit = () => { inp.style.height = "auto"; inp.style.height = Math.min(inp.scrollHeight, 160) + "px"; };
@@ -766,11 +830,19 @@
   function checkQ0(t) {
     if (!t.cv) return;
     const asking = t.status && t.status !== "busy" && t.status !== "idle";
-    const q = asking && !t.qTerm && !t.readonly ? parseQ(screenText(t, 45)) : null;
+    const scr = asking && !t.qTerm && !t.readonly ? screenText(t, 45) : "";
+    const q = scr ? parseQ(scr) || parseP(scr) : null;
     t.el.classList.toggle("qmode", !!q);
     t.cv.q = q;
-    if (!q) { if (t.cv.qcard) { t.cv.qcard.remove(); t.cv.qcard.dataset.sig = ""; } return; }
+    if (!q) {
+      const c = t.cv.qcard; if (!c) return;
+      // recién contestada, la tarjeta se queda quieta hasta que llega la de verdad al registro (o la siguiente pregunta)
+      if (c.parentNode && !t.qTerm && !c.classList.contains("perm") && Date.now() - (t.qSent || 0) < 10000) { c.classList.add("sent"); return; }
+      c.remove(); c.dataset.sig = ""; c.classList.remove("sent"); return;
+    }
+    if (t.cv.qcard) t.cv.qcard.classList.remove("sent");
     if (t.cv.qcard && t.cv.qcard.contains(document.activeElement) && document.activeElement.matches("textarea") && t.cv.qcard.dataset.title === (q.title || "")) return; // escribiendo: no se repinta
+    if (q.review && Date.now() - (t.qAuto || 0) < 15000) { if (!t.qRevSent) { t.qRevSent = true; D.term.write(t.key, "1"); t.qSent = Date.now(); setTimeout(() => { t.qRevSent = false; }, 2500); } return; }
     paintQ(t, q);
     t.cv.qcard.dataset.title = q.title || "";
     const f = t.cv.feed, col = f.querySelector(".cv-col");

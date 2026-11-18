@@ -1849,7 +1849,10 @@
     refreshing = false;
   }
   if (DESK) {
-    setInterval(() => { if (!document.hidden) refreshSessions(); }, 30000);
+    // también con la ventana minimizada (las sesiones de fuera nacen mientras usas otra cosa) y al volver a ella
+    setInterval(refreshSessions, 15000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshSessions(); });
+    addEventListener("focus", () => refreshSessions());
     addEventListener("DOMContentLoaded", () => { if (window.cumuloTerm) window.cumuloTerm.onStatus((key, st) => { if (st === "id" || st === "done" || st === "exit") setTimeout(refreshSessions, 1500); }); });
   }
 
