@@ -69,12 +69,13 @@ function read(root, id) {
       fs.readSync(fd, buf, 0, buf.length, t.pos); fs.closeSync(fd); t.pos = size;
       const lines = (t.rest + buf.toString("utf8")).split("\n"); t.rest = lines.pop();
       for (const line of lines) {
-        if (!/"type":"(user|assistant)"/.test(line.slice(0, 400) + line.slice(-400))) continue;
+        if (!line.includes('"type":"user"') && !line.includes('"type":"assistant"')) continue;
         let o; try { o = JSON.parse(line); } catch { continue; }
         if (o.isSidechain) continue;
         const at = o.timestamp || null;
         if (o.type === "user") { const u = userItem(o); if (u) { u.at = at; t.items.push(u); } continue; }
         if (o.type !== "assistant" || !o.message || !Array.isArray(o.message.content)) continue;
+        if (o.message.model === "<synthetic>") continue; // avisos que no escribe Claude («No response requested.»)
         for (const p of o.message.content) {
           if (!p) continue;
           if (p.type === "text" && p.text && p.text.trim()) t.items.push({ k: "a", text: p.text.trim(), at });

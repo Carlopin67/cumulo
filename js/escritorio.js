@@ -90,7 +90,10 @@
     if (window.ImageAddon) { try { xt.loadAddon(new window.ImageAddon.ImageAddon({ sixelSizeLimit: 8e6 })); } catch { /* sin imágenes */ } }
     imageLinks(xt, opts.cwd);
     const t = { key, xt, fit, el, live, pid: 0, sessionId: opts.sessionId || null, exited: false, opts, createdAt: Date.now() };
-    if (!opts.shell) { el.prepend(makeFeed(t)); live.append(grip(t)); }
+    if (!opts.shell) {
+      el.prepend(makeFeed(t)); el.append(makeComposer(t));
+      const h = document.createElement("p"); h.className = "xt-ask-h"; h.textContent = "Claude necesita tu respuesta · contesta aquí con el teclado"; live.append(h);
+    }
     new ResizeObserver(() => { if (t === active) fitNow(t); }).observe(live);
     terms.set(key, t);
     // copiar con selección, pegar texto; si el portapapeles solo tiene una imagen, Claude la lee con Alt+V
@@ -125,7 +128,14 @@
     t.starting = true;
     try {
       const r = await D.term.open({ key: t.key, sessionId: t.sessionId, cwd: t.opts.cwd, shellOnly: t.opts.shell, cols: t.xt.cols, rows: t.xt.rows });
+      if (r.elsewhere) {
+        t.exited = true;
+        t.xt.write("\r\n\x1b[2m— Esta sesión ya está abierta en otra ventana. Aquí puedes leerla; para escribir, ciérrala allí y pulsa Intro.\x1b[0m\r\n");
+        if (t.cv) t.cv.input.placeholder = "Esta sesión está abierta en otra ventana: aquí solo se puede leer";
+        return;
+      }
       t.pid = r.pid; t.exited = false;
+      if (t.cv) t.cv.input.placeholder = "Escribe a Claude…";
       if (r.buffer) { t.xt.write(r.buffer); if (!t.opts.shell) sniff(t); }
     } catch (e) {
       t.exited = true;
@@ -269,67 +279,88 @@
   box.innerHTML = `<figure><img alt=""><figcaption></figcaption></figure>`;
   document.body.append(box);
   const boxImg = box.querySelector("img"), boxCap = box.querySelector("figcaption");
-  const closeBox = () => { box.hidden = true; if (active) active.xt.focus(); };
+  const closeBox = () => { box.hidden = true; focusT(active); };
   box.onclick = closeBox;
   document.addEventListener("keydown", e => { if (e.key === "Escape" && !box.hidden) { e.stopPropagation(); closeBox(); } }, true);
   const zoom = (src, name) => { boxImg.src = src; boxCap.textContent = name || ""; box.hidden = false; };
 
   function imgEl(src, name, file) {
-    const f = document.createElement("button"); f.type = "button"; f.className = "cv-img";
-    f.title = (name || "Imagen") + (file ? "  (clic: ampliar · doble clic: abrir)" : "");
+    const f = document.createElement("figure"); f.className = "cv-fig";
+    const b = document.createElement("button"); b.type = "button"; b.className = "cv-img";
+    b.title = file ? "Clic: ampliar · doble clic: abrir el archivo" : "Clic: ampliar";
     const im = document.createElement("img"); im.alt = name || ""; im.loading = "lazy"; im.src = src;
-    im.onerror = () => { f.classList.add("gone"); f.textContent = "Imagen ya no disponible" + (name ? ` · ${name}` : ""); };
-    f.append(im);
-    f.onclick = () => zoom(src, name);
-    if (file) f.ondblclick = () => D.open(file);
+    im.onerror = () => { f.classList.add("gone"); b.remove(); };
+    b.append(im);
+    b.onclick = () => zoom(src, name);
+    if (file) b.ondblclick = () => D.open(file);
+    f.append(b);
+    if (name) { const c = document.createElement("figcaption"); c.textContent = name; f.append(c); }
     return f;
   }
-  const TOOL_ES = { Read: "Lee", Write: "Escribe", Edit: "Edita", Bash: "Ejecuta", PowerShell: "Ejecuta", Grep: "Busca", Glob: "Busca archivos",
-    WebFetch: "Abre", WebSearch: "Busca en internet", Agent: "Agente", Task: "Agente", TodoWrite: "Tareas", AskUserQuestion: "Te pregunta", Skill: "Habilidad" };
-  function itemEl(t, x) {
-    if (x.k === "u") {
-      const d = document.createElement("div"); d.className = "cv-u";
-      const b = document.createElement("div"); b.className = "cv-bubble";
-      if (x.imgs && x.imgs.length) { const g = document.createElement("div"); g.className = "cv-imgs"; x.imgs.forEach(s => g.append(imgEl(s, "Imagen adjunta"))); b.append(g); }
-      if (x.text) { const p = document.createElement("div"); p.className = "cv-utext"; p.textContent = x.text; b.append(p); }
-      d.append(b); return d;
-    }
-    if (x.k === "a") { const d = document.createElement("div"); d.className = "cv-a"; d.innerHTML = md(x.text); return d; }
-    if (x.k === "t") {
-      const d = document.createElement("div"); d.className = "cv-t";
-      const name = String(x.name || "").replace(/^mcp__[^_]+(?:_[^_]+)*__/, "");
-      d.innerHTML = `<span class="cv-dot"></span><b></b><span class="cv-arg"></span>`;
-      d.querySelector("b").textContent = TOOL_ES[x.name] || name;
-      d.querySelector(".cv-arg").textContent = x.arg || "";
-      d.title = `${x.name}${x.arg ? " · " + x.arg : ""}`;
-      return d;
-    }
-    if (x.k === "img") {
-      const name = x.path.split(/[\\/]/).pop();
-      const d = document.createElement("div"); d.className = "cv-shot";
-      d.append(x.gone ? Object.assign(document.createElement("p"), { className: "cv-gone", textContent: `Imagen ya borrada · ${name}` }) : imgEl(fileUrl(x.path), name, x.path));
-      return d;
-    }
-    return null;
+  const TOOL_ES = { Read: "Lee", Write: "Escribe", Edit: "Edita", MultiEdit: "Edita", Bash: "Ejecuta", PowerShell: "Ejecuta", Grep: "Busca", Glob: "Busca archivos",
+    WebFetch: "Abre", WebSearch: "Busca en internet", Agent: "Agente", Task: "Agente", TodoWrite: "Tareas", AskUserQuestion: "Te pregunta", Skill: "Habilidad", NotebookEdit: "Edita" };
+  const hhmm = at => { try { return at ? new Intl.DateTimeFormat("es-ES", { hour: "2-digit", minute: "2-digit" }).format(new Date(at)) : ""; } catch { return ""; } };
+  const toolName = x => TOOL_ES[x.name] || String(x.name || "").replace(/^mcp__.*?__/, "").replace(/_/g, " ");
+  // lo que se lee de un vistazo: la ruta se queda en el nombre del archivo
+  const toolShort = x => { const a = x.arg || ""; return /^[A-Za-z]:[\\/]|^\//.test(a) && !/\s/.test(a) ? a.split(/[\\/]/).pop() : a; };
+  function head(who, at) {
+    const h = document.createElement("header"); h.className = "cv-head";
+    h.innerHTML = `<span class="cv-who"></span><time></time>`;
+    h.firstChild.textContent = who; h.lastChild.textContent = hhmm(at);
+    return h;
   }
-  const PAGE = 300; // se pintan las últimas; las anteriores, al pedirlas
+  // un turno: tu mensaje y, debajo, todo lo que hace y dice Claude hasta tu siguiente mensaje
   function renderItems(t, list, prepend) {
     const frag = document.createDocumentFragment();
-    let lastTools = prepend ? null : t.cv.lastTools;
+    let st = prepend ? { claude: null, tools: null } : t.cv.st || { claude: null, tools: null };
+    const claudeBlock = at => {
+      if (st.claude) return st.claude;
+      const c = document.createElement("section"); c.className = "cv-claude";
+      c.append(head("Claude", at));
+      const body = document.createElement("div"); body.className = "cv-body"; c.append(body);
+      frag.append(c); st.claude = body; return body;
+    };
     list.forEach(x => {
-      const el = itemEl(t, x); if (!el) return;
-      // herramientas seguidas: un solo bloque compacto
+      if (x.k === "u") {
+        const u = document.createElement("section"); u.className = "cv-user";
+        u.append(head("Tú", x.at));
+        if (x.imgs && x.imgs.length) { const g = document.createElement("div"); g.className = "cv-imgs"; x.imgs.forEach(s => g.append(imgEl(s, ""))); u.append(g); }
+        if (x.text) { const p = document.createElement("div"); p.className = "cv-utext"; p.textContent = x.text; u.append(p); }
+        frag.append(u); st = { claude: null, tools: null }; return;
+      }
+      const body = claudeBlock(x.at);
       if (x.k === "t") {
-        if (!lastTools) { lastTools = document.createElement("div"); lastTools.className = "cv-tools"; frag.append(lastTools); }
-        lastTools.append(el);
-      } else { lastTools = null; frag.append(el); }
+        // acciones seguidas: un solo renglón plegado («Lee mon4.png y 3 más»); se despliega al pulsar
+        if (!st.tools) {
+          const d = document.createElement("details"); d.className = "cv-tools";
+          d.innerHTML = `<summary><svg class="cv-tico" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg><span class="cv-tsum"></span><span class="cv-tn"></span></summary><ol></ol>`;
+          body.append(d); st.tools = { d, n: 0, first: x };
+        }
+        const li = document.createElement("li");
+        li.innerHTML = `<b></b><span></span>`; li.firstChild.textContent = toolName(x); li.lastChild.textContent = x.arg || "";
+        li.title = x.arg || "";
+        st.tools.d.querySelector("ol").append(li);
+        st.tools.n++;
+        const f = st.tools.first;
+        st.tools.d.querySelector(".cv-tsum").textContent = `${toolName(f)} ${toolShort(f)}`.trim();
+        st.tools.d.querySelector(".cv-tn").textContent = st.tools.n > 1 ? `y ${st.tools.n - 1} más` : "";
+        return;
+      }
+      st.tools = null;
+      if (x.k === "a") { const d = document.createElement("div"); d.className = "cv-a"; d.innerHTML = md(x.text); body.append(d); return; }
+      if (x.k === "img") {
+        const name = x.path.split(/[\\/]/).pop();
+        if (x.gone) { const p = document.createElement("p"); p.className = "cv-gone"; p.textContent = `Imagen ya borrada · ${name}`; body.append(p); }
+        else body.append(imgEl(fileUrl(x.path), name, x.path));
+      }
     });
-    if (prepend) t.cv.list.prepend(frag); else { t.cv.list.append(frag); t.cv.lastTools = lastTools; }
+    if (prepend) t.cv.list.prepend(frag); else { t.cv.list.append(frag); t.cv.st = st; }
   }
+  const PAGE = 300; // se pintan las últimas; las anteriores, al pedirlas
   function makeFeed(t) {
     const feed = document.createElement("div"); feed.className = "xt-feed";
-    feed.innerHTML = `<div class="cv-col"><button type="button" class="cv-more" hidden></button><div class="cv-list"></div><p class="cv-empty">Escribe abajo para empezar. Aquí irá la conversación, con las imágenes en su sitio.</p></div>`;
-    t.cv = { feed, list: feed.querySelector(".cv-list"), more: feed.querySelector(".cv-more"), empty: feed.querySelector(".cv-empty"), items: [], shownFrom: 0, lastTools: null, busy: false, id: null };
+    feed.innerHTML = `<div class="cv-col"><button type="button" class="cv-more" hidden></button><div class="cv-list"></div><div class="cv-work"><span class="cv-spark" aria-hidden="true"></span>Claude está trabajando<small></small></div><p class="cv-empty">Escribe abajo para empezar. Aquí irá la conversación, con las imágenes en su sitio.</p></div>`;
+    t.cv = { feed, list: feed.querySelector(".cv-list"), more: feed.querySelector(".cv-more"), empty: feed.querySelector(".cv-empty"), work: feed.querySelector(".cv-work"), items: [], shownFrom: 0, st: null, busy: false, id: null };
     t.cv.more.onclick = () => {
       const cv = t.cv, from = Math.max(0, cv.shownFrom - PAGE), h = feed.scrollHeight;
       renderItems(t, cv.items.slice(from, cv.shownFrom), true); cv.shownFrom = from;
@@ -343,12 +374,12 @@
     if (!t || !t.cv || t.opts.shell || !D.sessFeed) return;
     const cv = t.cv;
     if (!t.sessionId || cv.busy) return;
-    if (cv.id !== t.sessionId) { cv.id = t.sessionId; cv.items = []; cv.shownFrom = 0; cv.list.textContent = ""; cv.lastTools = null; }
+    if (cv.id !== t.sessionId) { cv.id = t.sessionId; cv.items = []; cv.shownFrom = 0; cv.list.textContent = ""; cv.st = null; }
     cv.busy = true;
     let r = null; try { r = await D.sessFeed(t.sessionId, cv.items.length); } catch { /* sin datos */ }
     cv.busy = false;
     if (!r || cv.id !== t.sessionId) return;
-    if (r.reset) { cv.items = []; cv.shownFrom = 0; cv.list.textContent = ""; cv.lastTools = null; }
+    if (r.reset) { cv.items = []; cv.shownFrom = 0; cv.list.textContent = ""; cv.st = null; }
     if (!r.items.length) { cv.empty.hidden = !!cv.items.length; return; }
     const f = cv.feed, stick = f.scrollTop + f.clientHeight >= f.scrollHeight - 60 || !cv.items.length;
     const first = !cv.items.length;
@@ -378,27 +409,114 @@
     requestAnimationFrame(() => { fitNow(active); if (active && active.cv && !raw) active.cv.feed.scrollTop = active.cv.feed.scrollHeight; });
   }
   setView(rawTerm);
-  if (viewBtn) viewBtn.onclick = () => { setView(!rawTerm); if (active) active.xt.focus(); };
+  if (viewBtn) viewBtn.onclick = () => { setView(!rawTerm); focusT(active); };
 
-  // la parte viva se puede hacer más alta o más baja arrastrando su borde
-  let liveH = 0; try { liveH = +localStorage.getItem("cumulo-viva-h") || 0; } catch { /* nada */ }
-  if (liveH) root.style.setProperty("--live-h", liveH + "px");
-  function grip(t) {
-    const g = document.createElement("div"); g.className = "xt-grip"; g.title = "Arrastra para cambiar el alto";
-    g.onpointerdown = e => {
-      e.preventDefault(); g.setPointerCapture(e.pointerId);
-      const y0 = e.clientY, h0 = t.live.offsetHeight;
-      g.onpointermove = ev => { liveH = Math.max(120, Math.min(t.el.offsetHeight - 120, h0 + (y0 - ev.clientY))); root.style.setProperty("--live-h", liveH + "px"); };
-      g.onpointerup = () => { g.onpointermove = null; try { localStorage.setItem("cumulo-viva-h", String(Math.round(liveH))); } catch { /* nada */ } };
+
+  // ── caja de escribir propia (en vez de la línea de la terminal) ──
+  // Lo escrito se le pasa a Claude como un pegado (respeta los saltos de línea) y luego Intro.
+  // Las imágenes pegadas o arrastradas se guardan en un archivo y viajan como su ruta: Claude las adjunta.
+  const IC = {
+    clip: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 7.6 8.1 13a3.3 3.3 0 0 1-4.7-4.7l5.6-5.6a2.2 2.2 0 0 1 3.1 3.1L6.6 11.3a1.1 1.1 0 0 1-1.6-1.6l5-5"/></svg>`,
+    send: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M4 7l4-4 4 4"/></svg>`,
+    stop: `<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4.5" y="4.5" width="7" height="7" rx="1.2"/></svg>`,
+    x: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 5l6 6M11 5l-6 6"/></svg>`,
+  };
+  const focusT = t => {
+    if (!t) return;
+    if (!t.opts.shell && !rawTerm && t.cv && !t.el.classList.contains("ask")) t.cv.input.focus({ preventScroll: true });
+    else t.xt.focus();
+  };
+  function makeComposer(t) {
+    const c = document.createElement("form"); c.className = "cv-composer"; c.autocomplete = "off";
+    c.innerHTML = `<div class="cv-box">
+        <div class="cv-tray" hidden></div>
+        <div class="cv-row">
+          <label class="cv-btn" title="Adjuntar imágenes">${IC.clip}<input type="file" accept="image/*" multiple hidden></label>
+          <textarea rows="1" placeholder="Escribe a Claude…" aria-label="Mensaje para Claude" spellcheck="false"></textarea>
+          <button type="submit" class="cv-send" title="Enviar (Intro)" aria-label="Enviar">${IC.send}${IC.stop}</button>
+        </div>
+      </div>
+      <p class="cv-hint"><span><kbd>Intro</kbd> enviar</span><span><kbd>Mayús</kbd><kbd>Intro</kbd> nueva línea</span><span><kbd>Esc</kbd> parar</span><span>pega o arrastra imágenes</span><span class="cv-state"></span></p>`;
+    const ta = c.querySelector("textarea"), tray = c.querySelector(".cv-tray"), file = c.querySelector("input[type=file]"), sendB = c.querySelector(".cv-send");
+    const files = []; // rutas de imágenes ya guardadas
+    const autosize = () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 220) + "px"; };
+    const refresh = () => {
+      const busy = t.status === "busy";
+      c.classList.toggle("busy", busy && !ta.value.trim() && !files.length);
+      sendB.disabled = !busy && !ta.value.trim() && !files.length;
+      sendB.title = c.classList.contains("busy") ? "Parar (Esc)" : "Enviar (Intro)";
     };
-    return g;
+    const addPath = p => {
+      if (!p) return;
+      files.push(p);
+      const b = document.createElement("span"); b.className = "cv-att";
+      b.innerHTML = `<img alt=""><button type="button" title="Quitar">${IC.x}</button>`;
+      b.querySelector("img").src = fileUrl(p);
+      b.querySelector("button").onclick = () => { files.splice(files.indexOf(p), 1); b.remove(); tray.hidden = !files.length; refresh(); };
+      tray.append(b); tray.hidden = false; refresh();
+    };
+    const addBlob = async f => { try { const ext = (f.type.split("/")[1] || "png").replace("jpeg", "jpg"); addPath(await D.saveImage(new Uint8Array(await f.arrayBuffer()), ext)); } catch { /* no se pudo guardar */ } };
+    file.onchange = () => { [...file.files].forEach(f => { const p = D.pathFor(f); p ? addPath(p) : addBlob(f); }); file.value = ""; ta.focus(); };
+    ta.addEventListener("paste", e => {
+      const imgs = [...(e.clipboardData && e.clipboardData.items || [])].filter(i => i.type.startsWith("image/"));
+      if (!imgs.length) return;
+      e.preventDefault(); imgs.forEach(i => addBlob(i.getAsFile()));
+    });
+    c.addEventListener("dragover", e => { e.preventDefault(); c.classList.add("drag"); });
+    c.addEventListener("dragleave", () => c.classList.remove("drag"));
+    c.addEventListener("drop", e => {
+      e.preventDefault(); e.stopPropagation(); c.classList.remove("drag");
+      [...e.dataTransfer.files].forEach(f => { const p = D.pathFor(f); if (p && /\.(png|jpe?g|gif|webp|bmp)$/i.test(p)) addPath(p); else if (p) { ta.value += (ta.value ? " " : "") + (/\s/.test(p) ? `"${p}"` : p); autosize(); refresh(); } });
+      ta.focus();
+    });
+    ta.addEventListener("input", () => { autosize(); refresh(); });
+    ta.addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); c.requestSubmit(); }
+      else if (e.key === "Escape" && t.status === "busy") { e.preventDefault(); e.stopPropagation(); D.term.write(t.key, "\x1b"); }
+    });
+    c.addEventListener("submit", e => {
+      e.preventDefault();
+      if (c.classList.contains("busy")) { D.term.write(t.key, "\x1b"); return; }
+      const text = [ta.value.trim(), ...files.map(p => /\s/.test(p) ? `"${p}"` : p)].filter(Boolean).join(" ");
+      if (!text || t.exited) { if (t.exited) restart(t); return; }
+      D.term.write(t.key, "\x05\x15"); // lo que hubiera a medias en la línea de Claude, fuera
+      setTimeout(() => D.term.write(t.key, "\x1b[200~" + text + "\x1b[201~"), 80);
+      setTimeout(() => D.term.write(t.key, "\r"), 380);
+      ta.value = ""; files.length = 0; tray.textContent = ""; tray.hidden = true; autosize(); refresh();
+      t.cv.pinUntil = Date.now() + 4000; t.cv.feed.scrollTop = t.cv.feed.scrollHeight;
+    });
+    t.cv.input = ta; t.cv.refresh = refresh; t.cv.stateEl = c.querySelector(".cv-state");
+    refresh();
+    return c;
   }
+  // «trabajando…» al final de la conversación mientras Claude responde
+  function setStatus(t, status) {
+    if (!t.cv) return;
+    const was = t.status; t.status = status;
+    const ask = status !== "busy" && status !== "idle";
+    t.el.classList.toggle("ask", ask);
+    t.el.classList.toggle("working", status === "busy");
+    if (status === "busy" && was !== "busy") t.cv.since = Date.now();
+    if (t.cv.refresh) t.cv.refresh();
+    if (t === active && ask !== (was !== "busy" && was !== "idle" && was !== undefined)) requestAnimationFrame(() => focusT(t));
+  }
+  setInterval(() => {
+    const t = active; if (!t || !t.cv || t.status !== "busy") return;
+    const s = Math.round((Date.now() - (t.cv.since || Date.now())) / 1000);
+    t.cv.work.querySelector("small").textContent = s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
+  }, 1000);
 
   // arrastrar archivos al terminal escribe sus rutas (Claude las entiende como adjuntos)
   host.addEventListener("dragover", e => { e.preventDefault(); });
   host.addEventListener("drop", e => {
     e.preventDefault(); if (!active) return;
     const paths = [...e.dataTransfer.files].map(f => D.pathFor(f)).filter(Boolean);
+    // en la vista de conversación, lo soltado va a la caja de escribir
+    if (paths.length && active.cv && !rawTerm && !active.el.classList.contains("ask")) {
+      const dt = new DataTransfer(); [...e.dataTransfer.files].forEach(f => dt.items.add(f));
+      active.el.querySelector(".cv-composer").dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+      return;
+    }
     if (paths.length) { active.xt.paste(paths.map(p => /\s/.test(p) ? `"${p}"` : p).join(" ")); active.xt.focus(); }
   });
 
@@ -417,7 +535,7 @@
       }
       const prev = lastStatus.get(t.key); lastStatus.set(t.key, L.status);
       // Claude te pregunta algo (permiso, elegir una opción): la parte viva crece para que se vea entera
-      t.el.classList.toggle("ask", L.status !== "busy" && L.status !== "idle");
+      setStatus(t, L.status);
       if (prev !== L.status) emit(t, L.status === "busy" ? "working" : L.status === "idle" ? (prev === "busy" ? "done" : "idle") : "ask");
       const c = v.context && t.sessionId && v.context[t.sessionId];
       if (c && t === active && window.cumuloMonitor && window.cumuloMonitor.setContext) window.cumuloMonitor.setContext(c.tokens, false, c.size);
@@ -534,11 +652,11 @@
       active = t;
       if (!t.opts.shell) claudeBox(t, t.ctx, t.busy ? "busy" : "idle");
       feedTick(t);
-      requestAnimationFrame(() => { if (active === t) { fitNow(t); t.xt.focus(); } });
+      requestAnimationFrame(() => { if (active === t) { fitNow(t); focusT(t); } });
       return t;
     },
     hide() { showSeq++; if (active) active.xt.blur(); active = null; },
-    focus() { if (active) active.xt.focus(); },
+    focus() { focusT(active); },
     has: key => terms.has(key),
     kill(key) {
       const p = making.get(key);

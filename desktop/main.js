@@ -78,6 +78,12 @@ function sendBar(ch, ...a) { if (bar && !bar.isDestroyed() && bar.isVisible()) b
 ipcMain.handle("term:open", async (_e, { key, sessionId, cwd, cols, rows, shellOnly }) => {
   const t = terms.get(key);
   if (t) { try { t.p.resize(cols, rows); } catch { /* ya cerrado */ } return { pid: t.p.pid, reused: true, buffer: t.buf.join("") }; }
+  // una sesión que ya está abierta en otro sitio (otra ventana, otro terminal) no se abre dos veces:
+  // serían dos Claude escribiendo en la misma conversación
+  if (sessionId && !shellOnly) {
+    const mine = new Set([...terms.values()].map(r => r.p.pid));
+    if (readLive().some(l => l.sessionId === sessionId && !mine.has(l.pid))) return { pid: 0, elsewhere: true, buffer: "" };
+  }
   const dir = cwd && fs.existsSync(cwd) ? cwd : os.homedir();
   const file = shellOnly ? "powershell.exe" : CLAUDE;
   const args = shellOnly ? ["-NoLogo"] : sessionId ? ["--resume", sessionId] : [];
