@@ -587,6 +587,7 @@
       D.term.write(t.key, "\x05\x15"); // lo que hubiera a medias en la línea de Claude, fuera
       setTimeout(() => D.term.write(t.key, "\x1b[200~" + text + "\x1b[201~"), 80);
       setTimeout(() => D.term.write(t.key, "\r"), 380);
+      t.qSent = Date.now();
       // el mensaje sale ya en el chat; cuando Claude lo apunta en su registro se cambia por el de verdad
       const pend = document.createElement("section"); pend.className = "cv-user pending";
       pend.append(head("Tú", new Date().toISOString()));
@@ -695,7 +696,7 @@
     const K = d => D.term.write(t.key, d);
     const run = async f => {
       if (c.classList.contains("sending")) return;
-      c.classList.add("sending");
+      c.classList.add("sending"); t.qSent = Date.now();
       try { await f(); } catch { /* se vuelve a leer la pantalla */ }
       await sleep(350); c.classList.remove("sending"); checkQ(t);
     };
@@ -757,7 +758,9 @@
     if (!want) { clearTimeout(t.askT); t.askT = 0; t.el.classList.remove("askshow"); return; }
     if (t.qTerm) { t.el.classList.add("askshow"); return; }
     if (t.el.classList.contains("askshow") || t.askT) return;
-    t.askT = setTimeout(() => { t.askT = 0; checkQ(t); if (t.el.classList.contains("ask") && !t.el.classList.contains("qmode")) t.el.classList.add("askshow"); }, 1300);
+    // justo después de contestar, Claude tarda unos segundos en marcar que ya sigue: ahí no se enseña nada
+    const wait = Math.max(1300, (t.qSent || 0) + 6000 - Date.now());
+    t.askT = setTimeout(() => { t.askT = 0; if (Date.now() - (t.qSent || 0) < 6000) { askShow(t); return; } checkQ(t); if (t.el.classList.contains("ask") && !t.el.classList.contains("qmode")) t.el.classList.add("askshow"); }, wait);
   }
   function checkQ(t) { checkQ0(t); if (t.el) askShow(t); }
   function checkQ0(t) {
