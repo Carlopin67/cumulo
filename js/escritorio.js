@@ -74,21 +74,24 @@
 
   async function make(key, opts) {
     await ready;
-    const el = document.createElement("div"); el.className = "xt"; host.append(el);
+    const el = document.createElement("div"); el.className = "xt" + (opts.shell ? " shell" : ""); host.append(el);
+    const live = document.createElement("div"); live.className = "xt-live"; el.append(live);
     const xt = new window.Terminal({
       fontFamily: "'Cascadia Mono', 'Martian Mono', Consolas, monospace", fontSize: 13, lineHeight: 1.15,
       cursorBlink: true, cursorStyle: "bar", allowProposedApi: true, scrollback: 8000,
       theme: xtTheme(), macOptionIsMeta: true, windowsPty: { backend: "conpty" },
     });
     const fit = new window.FitAddon.FitAddon();
-    xt.loadAddon(fit); xt.open(el);
+    xt.loadAddon(fit); xt.open(live);
     if (window.WebglAddon) {
       try { const gl = new window.WebglAddon.WebglAddon(); gl.onContextLoss(() => gl.dispose()); xt.loadAddon(gl); } catch { /* sin WebGL: se queda el normal */ }
     }
     // imágenes dentro de la terminal (sixel e iTerm: imgcat, chafa, viu…)
     if (window.ImageAddon) { try { xt.loadAddon(new window.ImageAddon.ImageAddon({ sixelSizeLimit: 8e6 })); } catch { /* sin imágenes */ } }
     imageLinks(xt, opts.cwd);
-    const t = { key, xt, fit, el, pid: 0, sessionId: opts.sessionId || null, exited: false, opts, createdAt: Date.now() };
+    const t = { key, xt, fit, el, live, pid: 0, sessionId: opts.sessionId || null, exited: false, opts, createdAt: Date.now() };
+    if (!opts.shell) { el.prepend(makeFeed(t)); live.append(grip(t)); }
+    new ResizeObserver(() => { if (t === active) fitNow(t); }).observe(live);
     terms.set(key, t);
     // copiar con selección, pegar texto; si el portapapeles solo tiene una imagen, Claude la lee con Alt+V
     xt.attachCustomKeyEventHandler(e => {
@@ -208,17 +211,60 @@
     });
   }
 
-  // ── imágenes de la sesión: lo que Claude mira o crea aparece debajo de su terminal (como en el móvil) ──
-  const shots = document.createElement("div"); shots.className = "xt-shots"; shots.hidden = true;
-  shots.innerHTML = `<button type="button" class="xs-head" aria-expanded="true"><span>Imágenes</span><small></small><svg class="ico chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></button><div class="xs-row" role="list"></div>`;
-  host.after(shots);
-  const shotRow = shots.querySelector(".xs-row"), shotHead = shots.querySelector(".xs-head");
+  // ── vista de conversación (como la app del móvil) ──
+  // Arriba, la conversación leída del .jsonl de la sesión: tus mensajes, lo que responde Claude, sus
+  // herramientas y las imágenes en su sitio. Abajo, la parte viva de Claude (donde se escribe, el
+  // «pensando…», los permisos y las preguntas), que crece sola cuando Claude te pregunta algo.
   const fileUrl = p => "file:///" + encodeURI(p.replace(/\\/g, "/")).replace(/#/g, "%23");
-  let folded = false; try { folded = localStorage.getItem("cumulo-shots-folded") === "1"; } catch { /* sin almacenamiento */ }
-  const setFold = v => { folded = v; shots.classList.toggle("folded", v); shotHead.setAttribute("aria-expanded", String(!v)); try { localStorage.setItem("cumulo-shots-folded", v ? "1" : "0"); } catch { /* da igual */ } requestAnimationFrame(() => fitNow(active)); };
-  setFold(folded);
-  shotHead.onclick = () => setFold(!folded);
-  // vista grande: clic o Esc para cerrar; doble clic abre el archivo
+  const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  function inline(s) {
+    return esc(s)
+      .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
+      .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,;:!?]|$)/g, "$1<i>$2</i>")
+      .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>');
+  }
+  // markdown corto: bloques de código, títulos, listas, citas, tablas (tal cual) y párrafos
+  function md(src) {
+    const out = [], lines = src.replace(/\r/g, "").split("\n");
+    let i = 0, para = [], list = null;
+    const flushP = () => { if (para.length) { out.push(`<p>${para.map(inline).join("<br>")}</p>`); para = []; } };
+    const flushL = () => { if (list) { out.push(`<${list.tag}>${list.items.map(x => `<li>${inline(x)}</li>`).join("")}</${list.tag}>`); list = null; } };
+    while (i < lines.length) {
+      const l = lines[i];
+      if (/^\s*```/.test(l)) {
+        flushP(); flushL();
+        const code = []; i++;
+        while (i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i++]);
+        i++; out.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`); continue;
+      }
+      if (/^\s*\|.*\|\s*$/.test(l)) {
+        flushP(); flushL();
+        const rows = [];
+        while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(lines[i++]);
+        const cells = r => r.trim().slice(1, -1).split("|").map(c => inline(c.trim()));
+        const body = rows.filter(r => !/^\s*\|[\s:|-]+\|\s*$/.test(r));
+        out.push(`<div class="cv-table"><table>${body.map((r, n) => `<tr>${cells(r).map(c => n ? `<td>${c}</td>` : `<th>${c}</th>`).join("")}</tr>`).join("")}</table></div>`);
+        continue;
+      }
+      let m;
+      if ((m = /^(#{1,4})\s+(.*)$/.exec(l))) { flushP(); flushL(); out.push(`<h4>${inline(m[2])}</h4>`); i++; continue; }
+      if ((m = /^\s*[-*•]\s+(.*)$/.exec(l)) || (m = /^\s*\d+[.)]\s+(.*)$/.exec(l))) {
+        flushP();
+        const tag = /^\s*\d/.test(l) ? "ol" : "ul";
+        if (!list || list.tag !== tag) { flushL(); list = { tag, items: [] }; }
+        list.items.push(m[1]); i++; continue;
+      }
+      if ((m = /^>\s?(.*)$/.exec(l))) { flushP(); flushL(); out.push(`<blockquote>${inline(m[1])}</blockquote>`); i++; continue; }
+      if (!l.trim()) { flushP(); flushL(); i++; continue; }
+      if (list && /^\s{2,}\S/.test(l)) { list.items[list.items.length - 1] += " " + l.trim(); i++; continue; }
+      flushL(); para.push(l); i++;
+    }
+    flushP(); flushL();
+    return out.join("");
+  }
+
+  // vista grande de una imagen: clic o Esc para cerrar
   const box = document.createElement("div"); box.className = "xt-box"; box.hidden = true;
   box.innerHTML = `<figure><img alt=""><figcaption></figcaption></figure>`;
   document.body.append(box);
@@ -226,37 +272,127 @@
   const closeBox = () => { box.hidden = true; if (active) active.xt.focus(); };
   box.onclick = closeBox;
   document.addEventListener("keydown", e => { if (e.key === "Escape" && !box.hidden) { e.stopPropagation(); closeBox(); } }, true);
-  let shotKey = "", shotBusy = false;
-  async function refreshShots() {
-    const t = active;
-    if (!t || !t.sessionId || t.opts.shell || !D.sessImages) { if (!shots.hidden) { shots.hidden = true; shotKey = ""; fitNow(active); } return; }
-    if (shotBusy) return; shotBusy = true;
-    let list = []; try { list = await D.sessImages(t.sessionId); } catch { /* sin datos */ }
-    shotBusy = false;
-    if (t !== active) return;
-    const key = t.sessionId + "|" + list.map(x => x.path).join("|");
-    if (key === shotKey) return;
-    const same = shotKey.startsWith(t.sessionId + "|"), had = new Set([...shotRow.children].map(b => b.dataset.p));
-    shotKey = key;
-    shotRow.textContent = "";
-    list.slice(-12).forEach(x => {
-      const b = document.createElement("button"); b.type = "button"; b.className = "xs-item"; b.dataset.p = x.path;
-      b.setAttribute("role", "listitem");
-      const name = x.path.split(/[\\/]/).pop(); b.title = name + "  (clic: ver · doble clic: abrir)";
-      const im = document.createElement("img"); im.alt = name; im.loading = "lazy"; im.src = fileUrl(x.path);
-      im.onerror = () => b.remove();
-      b.append(im);
-      if (same && !had.has(x.path)) b.classList.add("new");
-      b.onclick = () => { boxImg.src = im.src; boxCap.textContent = name; box.hidden = false; };
-      b.ondblclick = () => D.open(x.path);
-      shotRow.append(b);
-    });
-    shots.querySelector(".xs-head small").textContent = list.length;
-    const was = shots.hidden; shots.hidden = !list.length;
-    if (was !== shots.hidden) requestAnimationFrame(() => fitNow(active));
-    shotRow.scrollLeft = shotRow.scrollWidth;
+  const zoom = (src, name) => { boxImg.src = src; boxCap.textContent = name || ""; box.hidden = false; };
+
+  function imgEl(src, name, file) {
+    const f = document.createElement("button"); f.type = "button"; f.className = "cv-img";
+    f.title = (name || "Imagen") + (file ? "  (clic: ampliar · doble clic: abrir)" : "");
+    const im = document.createElement("img"); im.alt = name || ""; im.loading = "lazy"; im.src = src;
+    im.onerror = () => { f.classList.add("gone"); f.textContent = "Imagen ya no disponible" + (name ? ` · ${name}` : ""); };
+    f.append(im);
+    f.onclick = () => zoom(src, name);
+    if (file) f.ondblclick = () => D.open(file);
+    return f;
   }
-  setInterval(() => { if (!document.hidden) refreshShots(); }, 2000);
+  const TOOL_ES = { Read: "Lee", Write: "Escribe", Edit: "Edita", Bash: "Ejecuta", PowerShell: "Ejecuta", Grep: "Busca", Glob: "Busca archivos",
+    WebFetch: "Abre", WebSearch: "Busca en internet", Agent: "Agente", Task: "Agente", TodoWrite: "Tareas", AskUserQuestion: "Te pregunta", Skill: "Habilidad" };
+  function itemEl(t, x) {
+    if (x.k === "u") {
+      const d = document.createElement("div"); d.className = "cv-u";
+      const b = document.createElement("div"); b.className = "cv-bubble";
+      if (x.imgs && x.imgs.length) { const g = document.createElement("div"); g.className = "cv-imgs"; x.imgs.forEach(s => g.append(imgEl(s, "Imagen adjunta"))); b.append(g); }
+      if (x.text) { const p = document.createElement("div"); p.className = "cv-utext"; p.textContent = x.text; b.append(p); }
+      d.append(b); return d;
+    }
+    if (x.k === "a") { const d = document.createElement("div"); d.className = "cv-a"; d.innerHTML = md(x.text); return d; }
+    if (x.k === "t") {
+      const d = document.createElement("div"); d.className = "cv-t";
+      const name = String(x.name || "").replace(/^mcp__[^_]+(?:_[^_]+)*__/, "");
+      d.innerHTML = `<span class="cv-dot"></span><b></b><span class="cv-arg"></span>`;
+      d.querySelector("b").textContent = TOOL_ES[x.name] || name;
+      d.querySelector(".cv-arg").textContent = x.arg || "";
+      d.title = `${x.name}${x.arg ? " · " + x.arg : ""}`;
+      return d;
+    }
+    if (x.k === "img") {
+      const name = x.path.split(/[\\/]/).pop();
+      const d = document.createElement("div"); d.className = "cv-shot";
+      d.append(x.gone ? Object.assign(document.createElement("p"), { className: "cv-gone", textContent: `Imagen ya borrada · ${name}` }) : imgEl(fileUrl(x.path), name, x.path));
+      return d;
+    }
+    return null;
+  }
+  const PAGE = 300; // se pintan las últimas; las anteriores, al pedirlas
+  function renderItems(t, list, prepend) {
+    const frag = document.createDocumentFragment();
+    let lastTools = prepend ? null : t.cv.lastTools;
+    list.forEach(x => {
+      const el = itemEl(t, x); if (!el) return;
+      // herramientas seguidas: un solo bloque compacto
+      if (x.k === "t") {
+        if (!lastTools) { lastTools = document.createElement("div"); lastTools.className = "cv-tools"; frag.append(lastTools); }
+        lastTools.append(el);
+      } else { lastTools = null; frag.append(el); }
+    });
+    if (prepend) t.cv.list.prepend(frag); else { t.cv.list.append(frag); t.cv.lastTools = lastTools; }
+  }
+  function makeFeed(t) {
+    const feed = document.createElement("div"); feed.className = "xt-feed";
+    feed.innerHTML = `<div class="cv-col"><button type="button" class="cv-more" hidden></button><div class="cv-list"></div><p class="cv-empty">Escribe abajo para empezar. Aquí irá la conversación, con las imágenes en su sitio.</p></div>`;
+    t.cv = { feed, list: feed.querySelector(".cv-list"), more: feed.querySelector(".cv-more"), empty: feed.querySelector(".cv-empty"), items: [], shownFrom: 0, lastTools: null, busy: false, id: null };
+    t.cv.more.onclick = () => {
+      const cv = t.cv, from = Math.max(0, cv.shownFrom - PAGE), h = feed.scrollHeight;
+      renderItems(t, cv.items.slice(from, cv.shownFrom), true); cv.shownFrom = from;
+      feed.scrollTop += feed.scrollHeight - h;
+      cv.more.hidden = !from; cv.more.textContent = `Ver ${Math.min(PAGE, from)} anteriores`;
+    };
+    feed.addEventListener("click", e => { const a = e.target.closest("a[href]"); if (a) { e.preventDefault(); D.open(a.href); } });
+    return feed;
+  }
+  async function feedTick(t = active) {
+    if (!t || !t.cv || t.opts.shell || !D.sessFeed) return;
+    const cv = t.cv;
+    if (!t.sessionId || cv.busy) return;
+    if (cv.id !== t.sessionId) { cv.id = t.sessionId; cv.items = []; cv.shownFrom = 0; cv.list.textContent = ""; cv.lastTools = null; }
+    cv.busy = true;
+    let r = null; try { r = await D.sessFeed(t.sessionId, cv.items.length); } catch { /* sin datos */ }
+    cv.busy = false;
+    if (!r || cv.id !== t.sessionId) return;
+    if (r.reset) { cv.items = []; cv.shownFrom = 0; cv.list.textContent = ""; cv.lastTools = null; }
+    if (!r.items.length) { cv.empty.hidden = !!cv.items.length; return; }
+    const f = cv.feed, stick = f.scrollTop + f.clientHeight >= f.scrollHeight - 60 || !cv.items.length;
+    const first = !cv.items.length;
+    if (first) cv.pinUntil = Date.now() + 5000; // al abrir, abajo del todo aunque las imágenes tarden en cargar
+    cv.items.push(...r.items);
+    if (first && cv.items.length > PAGE) {
+      cv.shownFrom = cv.items.length - PAGE;
+      cv.more.hidden = false; cv.more.textContent = `Ver ${Math.min(PAGE, cv.shownFrom)} anteriores`;
+      renderItems(t, cv.items.slice(cv.shownFrom));
+    } else renderItems(t, r.items);
+    cv.empty.hidden = true;
+    if (stick) {
+      f.scrollTop = f.scrollHeight;
+      // las imágenes llegan después: se sigue abajo cuando terminan de cargar
+      cv.list.querySelectorAll("img:not([data-w])").forEach(im => { im.dataset.w = "1"; im.addEventListener("load", () => { if (Date.now() < cv.pinUntil || f.scrollHeight - f.scrollTop - f.clientHeight < 600) f.scrollTop = f.scrollHeight; }, { once: true }); });
+    }
+  }
+  setInterval(() => { if (!document.hidden) feedTick(); }, 1200);
+
+  // vista: conversación (por defecto) o la terminal entera, como antes
+  let rawTerm = false; try { rawTerm = localStorage.getItem("cumulo-vista") === "terminal"; } catch { /* sin almacenamiento */ }
+  const viewBtn = document.getElementById("sView");
+  function setView(raw) {
+    rawTerm = raw; root.classList.toggle("raw-term", raw);
+    if (viewBtn) { viewBtn.querySelector("span").textContent = raw ? "Conversación" : "Terminal"; viewBtn.title = raw ? "Ver la conversación con las imágenes" : "Ver la terminal entera de Claude"; }
+    try { localStorage.setItem("cumulo-vista", raw ? "terminal" : "conversacion"); } catch { /* da igual */ }
+    requestAnimationFrame(() => { fitNow(active); if (active && active.cv && !raw) active.cv.feed.scrollTop = active.cv.feed.scrollHeight; });
+  }
+  setView(rawTerm);
+  if (viewBtn) viewBtn.onclick = () => { setView(!rawTerm); if (active) active.xt.focus(); };
+
+  // la parte viva se puede hacer más alta o más baja arrastrando su borde
+  let liveH = 0; try { liveH = +localStorage.getItem("cumulo-viva-h") || 0; } catch { /* nada */ }
+  if (liveH) root.style.setProperty("--live-h", liveH + "px");
+  function grip(t) {
+    const g = document.createElement("div"); g.className = "xt-grip"; g.title = "Arrastra para cambiar el alto";
+    g.onpointerdown = e => {
+      e.preventDefault(); g.setPointerCapture(e.pointerId);
+      const y0 = e.clientY, h0 = t.live.offsetHeight;
+      g.onpointermove = ev => { liveH = Math.max(120, Math.min(t.el.offsetHeight - 120, h0 + (y0 - ev.clientY))); root.style.setProperty("--live-h", liveH + "px"); };
+      g.onpointerup = () => { g.onpointermove = null; try { localStorage.setItem("cumulo-viva-h", String(Math.round(liveH))); } catch { /* nada */ } };
+    };
+    return g;
+  }
 
   // arrastrar archivos al terminal escribe sus rutas (Claude las entiende como adjuntos)
   host.addEventListener("dragover", e => { e.preventDefault(); });
@@ -280,6 +416,8 @@
         if (!old) { t.sessionId = L.sessionId; emit(t, "id"); }
       }
       const prev = lastStatus.get(t.key); lastStatus.set(t.key, L.status);
+      // Claude te pregunta algo (permiso, elegir una opción): la parte viva crece para que se vea entera
+      t.el.classList.toggle("ask", L.status !== "busy" && L.status !== "idle");
       if (prev !== L.status) emit(t, L.status === "busy" ? "working" : L.status === "idle" ? (prev === "busy" ? "done" : "idle") : "ask");
       const c = v.context && t.sessionId && v.context[t.sessionId];
       if (c && t === active && window.cumuloMonitor && window.cumuloMonitor.setContext) window.cumuloMonitor.setContext(c.tokens, false, c.size);
@@ -395,11 +533,11 @@
       terms.forEach(o => { o.el.hidden = o !== t; });
       active = t;
       if (!t.opts.shell) claudeBox(t, t.ctx, t.busy ? "busy" : "idle");
-      refreshShots();
+      feedTick(t);
       requestAnimationFrame(() => { if (active === t) { fitNow(t); t.xt.focus(); } });
       return t;
     },
-    hide() { showSeq++; if (active) active.xt.blur(); active = null; refreshShots(); },
+    hide() { showSeq++; if (active) active.xt.blur(); active = null; },
     focus() { if (active) active.xt.focus(); },
     has: key => terms.has(key),
     kill(key) {

@@ -71,7 +71,7 @@ contextBridge.exposeInMainWorld("cumuloDesktop", {
   reloadData: () => ipcRenderer.invoke("data:read"),
   open: target => ipcRenderer.invoke("os:open", target),
   saveImage: (bytes, ext) => ipcRenderer.invoke("clip:save", bytes, ext),
-  sessImages: id => ipcRenderer.invoke("sess:images", id),
+  sessFeed: (id, from) => ipcRenderer.invoke("sess:feed", id, from),
   // ruta de un archivo arrastrado (Electron ya no la pone en File.path)
   pathFor: f => { try { return webUtils.getPathForFile(f) || ""; } catch { return ""; } },
   home: process.env.USERPROFILE || "",

@@ -1,7 +1,7 @@
 {
   "name": "cumulo",
   "productName": "Cúmulo",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "description": "Lanzador de sesiones de Claude Code como cúmulo de estrellas",
   "main": "main.js",
   "private": true,
@@ -33,6 +33,7 @@
       "preload.js",
       "preload-barra.js",
       "sesiones.js",
+      "conversacion.js",
       "ventanas.js",
       "contadores.js",
       "teclawin.js",
