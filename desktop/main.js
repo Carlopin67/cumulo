@@ -382,7 +382,12 @@ function createTray() {
   tray.on("click", () => bringFront());
 }
 
-app.on("second-instance", () => bringFront());
+// si estaba abierto como app normal (p. ej. lo abrió el instalador) y el vigilante lo pide como escritorio,
+// se reinicia en modo escritorio: si no, no habría tecla Windows, ni barra, ni programas de inicio
+app.on("second-instance", (_e, argv) => {
+  if (!SHELL && argv.includes("--shell")) { app.isQuitting = true; app.relaunch({ args: [...process.argv.slice(1).filter(a => a !== "--shell"), "--shell"] }); app.exit(0); return; }
+  bringFront();
+});
 // ── barra de tareas siempre visible (solo como escritorio) ──────
 // Las apps maximizadas (Chrome…) ocupaban toda la pantalla y tapaban la barra de Cúmulo. Se reserva una franja
 // abajo (zona de trabajo de Windows) y ahí vive esta barra, encima de todo, mientras otra app está delante.

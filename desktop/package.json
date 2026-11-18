@@ -68,7 +68,7 @@
       "shortcutName": "Cúmulo",
       "installerIcon": "icono.ico",
       "uninstallerIcon": "icono.ico",
-      "runAfterFinish": true
+      "runAfterFinish": false
     }
   }
 }
