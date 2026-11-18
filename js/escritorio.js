@@ -169,6 +169,11 @@
       if (changed && t === active) claudeBox(t, t.ctx, t.busy ? "busy" : "idle");
     }, 500);
   }
+  function screenText(t, n = 40) {
+    const b = t.xt.buffer.active, out = [];
+    for (let i = Math.max(0, b.length - n); i < b.length; i++) { const l = b.getLine(i); out.push(l ? l.translateToString(true) : ""); }
+    return out.join("\n");
+  }
   function restart(t) { if (t.starting) return; t.xt.clear(); start(t); }
 
   // imagen del portapapeles → archivo temporal; devuelve su ruta (o null si no hay imagen)
@@ -309,6 +314,85 @@
     h.firstChild.textContent = who; h.lastChild.textContent = hhmm(at);
     return h;
   }
+  // ── encuestas (AskUserQuestion): se contestan en la tarjeta, sin ver la terminal ──
+  // Claude espera teclas: un número elige (o marca, si es de varias), «Type something» se rellena y se
+  // confirma con Intro, Tab pasa a la siguiente pregunta y en «Review your answers» el 1 envía.
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  function qCard(t, x) {
+    const card = document.createElement("div"); card.className = "cv-q"; if (x.id) card.dataset.q = x.id;
+    const sel = x.questions.map(() => ({ picked: new Set(), other: "" }));
+    const sendB = document.createElement("button");
+    const ready = () => sel.every(s => s.picked.size || s.other.trim());
+    const update = () => { sendB.disabled = !ready() || card.classList.contains("sending"); };
+    x.questions.forEach((q, qi) => {
+      const box = document.createElement("div"); box.className = "cv-qi" + (q.multi ? " multi" : ""); box.dataset.question = q.question;
+      box.innerHTML = `<p class="cv-qh"><span class="cv-qtag"></span><b></b><small class="cv-qkind"></small></p><div class="cv-qopts" role="${q.multi ? "group" : "radiogroup"}"></div><p class="cv-qother" hidden></p>`;
+      box.querySelector(".cv-qtag").textContent = q.header || "Pregunta";
+      box.querySelector("b").textContent = q.question;
+      box.querySelector(".cv-qkind").textContent = q.multi ? "Puedes elegir varias" : "";
+      const opts = box.querySelector(".cv-qopts");
+      const paint = () => opts.querySelectorAll(".cv-qo").forEach(b => { const on = b.dataset.i === "o" ? !!sel[qi].other.trim() : sel[qi].picked.has(+b.dataset.i); b.classList.toggle("on", on); b.setAttribute("aria-checked", String(on)); });
+      q.options.forEach((o, i) => {
+        const b = document.createElement("button"); b.type = "button"; b.className = "cv-qo"; b.dataset.i = i; b.dataset.label = o.label;
+        b.setAttribute("role", q.multi ? "checkbox" : "radio");
+        b.innerHTML = `<span class="cv-qmark" aria-hidden="true"></span><span class="cv-qt"><b></b><small></small></span>`;
+        b.querySelector("b").textContent = o.label;
+        b.querySelector("small").textContent = o.description;
+        b.onclick = () => {
+          if (card.classList.contains("done") || card.classList.contains("sending")) return;
+          const s = sel[qi];
+          if (q.multi) { s.picked.has(i) ? s.picked.delete(i) : s.picked.add(i); }
+          else { s.picked = new Set([i]); s.other = ""; otherIn.value = ""; }
+          paint(); update();
+        };
+        opts.append(b);
+      });
+      // otra respuesta escrita
+      const ow = document.createElement("label"); ow.className = "cv-qo cv-qo-other"; ow.dataset.i = "o";
+      ow.innerHTML = `<span class="cv-qmark" aria-hidden="true"></span><input type="text" placeholder="Otra respuesta…" spellcheck="false">`;
+      const otherIn = ow.querySelector("input");
+      otherIn.oninput = () => { sel[qi].other = otherIn.value; if (!q.multi && otherIn.value.trim()) sel[qi].picked.clear(); paint(); update(); };
+      otherIn.onkeydown = e => { if (e.key === "Enter" && (e.ctrlKey || ready())) { e.preventDefault(); sendB.click(); } };
+      opts.append(ow);
+      card.append(box);
+    });
+    const bar = document.createElement("div"); bar.className = "cv-qbar";
+    bar.innerHTML = `<span class="cv-qfoot">Elige y envía</span><button type="button" class="cv-qterm">Ver en la terminal</button>`;
+    sendB.type = "button"; sendB.className = "cv-qsend"; sendB.textContent = "Enviar respuestas";
+    bar.append(sendB); card.append(bar);
+    bar.querySelector(".cv-qterm").onclick = () => { t.el.classList.remove("qmode"); t.qTerm = true; focusT(t); };
+    sendB.onclick = async () => {
+      if (!ready() || t.exited || t.readonly) { if (t.readonly) card.querySelector(".cv-qfoot").textContent = "Esta sesión está en otra ventana: contesta allí"; return; }
+      card.classList.add("sending"); update(); card.querySelector(".cv-qfoot").textContent = "Enviando…";
+      try { await answerQ(t, x.questions, sel); card.querySelector(".cv-qfoot").textContent = "Enviada"; }
+      catch { card.querySelector(".cv-qfoot").textContent = "No se pudo: contesta en la terminal"; t.el.classList.remove("qmode"); }
+      card.classList.remove("sending"); update();
+    };
+    update();
+    return card;
+  }
+  async function answerQ(t, qs, sel) {
+    const K = d => D.term.write(t.key, d);
+    const scr = () => screenText(t, 30);
+    if (!/Type something|Enter to select/.test(scr())) throw new Error("no hay pregunta en pantalla");
+    for (let i = 0; i < qs.length; i++) {
+      const q = qs[i], s = sel[i], other = q.options.length + 1;
+      if (q.multi) {
+        for (const k of [...s.picked].sort()) { K(String(k + 1)); await sleep(220); }
+        if (s.other.trim()) { K(String(other)); await sleep(260); K(s.other.trim()); await sleep(260); }
+        K("\t");
+      } else if (s.other.trim()) { K(String(other)); await sleep(260); K(s.other.trim()); await sleep(260); K("\r"); }
+      else K(String([...s.picked][0] + 1));
+      await sleep(450);
+    }
+    // con varias preguntas (o de varias respuestas) sale el resumen: el 1 envía
+    for (let k = 0; k < 15; k++) {
+      const sc = scr();
+      if (/Submit answers/.test(sc)) { K("1"); return; }
+      if (!/Enter to select|Type something/.test(sc)) return; // ya se envió sola
+      await sleep(200);
+    }
+  }
   // un turno: tu mensaje y, debajo, todo lo que hace y dice Claude hasta tu siguiente mensaje
   function renderItems(t, list, prepend) {
     const frag = document.createDocumentFragment();
@@ -346,29 +430,7 @@
         st.tools.d.querySelector(".cv-tn").textContent = st.tools.n > 1 ? `y ${st.tools.n - 1} más` : "";
         return;
       }
-      if (x.k === "q") {
-        st.tools = null;
-        const card = document.createElement("div"); card.className = "cv-q"; if (x.id) card.dataset.q = x.id;
-        x.questions.forEach(q => {
-          const box = document.createElement("div"); box.className = "cv-qi"; box.dataset.question = q.question;
-          box.innerHTML = `<p class="cv-qh"><span class="cv-qtag"></span><b></b></p><ul></ul><p class="cv-qother" hidden></p>`;
-          box.querySelector(".cv-qtag").textContent = q.header || "Pregunta";
-          box.querySelector("b").textContent = q.question;
-          const ul = box.querySelector("ul");
-          q.options.forEach((o, i) => {
-            const li = document.createElement("li"); li.dataset.label = o.label;
-            li.innerHTML = `<span class="cv-qn"></span><span class="cv-qt"><b></b><small></small></span>`;
-            li.querySelector(".cv-qn").textContent = String(i + 1);
-            li.querySelector("b").textContent = o.label;
-            li.querySelector("small").textContent = o.description;
-            ul.append(li);
-          });
-          card.append(box);
-        });
-        const foot = document.createElement("p"); foot.className = "cv-qfoot"; foot.textContent = "Esperando tu respuesta";
-        card.append(foot);
-        body.append(card); return;
-      }
+      if (x.k === "q") { st.tools = null; body.append(qCard(t, x)); return; }
       if (x.k === "qa") {
         // se marca en su tarjeta lo que respondiste (y si escribiste otra cosa, se enseña)
         const sel = x.id ? `.cv-q[data-q="${CSS.escape(x.id)}"]` : null;
@@ -379,7 +441,7 @@
             const a = x.answers[box.dataset.question]; if (a == null) return;
             const picked = String(a).split(", ");
             let hit = false;
-            box.querySelectorAll("li").forEach(li => { const on = picked.includes(li.dataset.label) || String(a) === li.dataset.label; li.classList.toggle("on", on); hit = hit || on; });
+            box.querySelectorAll(".cv-qo[data-label]").forEach(li => { const on = picked.includes(li.dataset.label) || String(a) === li.dataset.label; li.classList.toggle("on", on); hit = hit || on; });
             if (!hit) { const o = box.querySelector(".cv-qother"); o.hidden = false; o.textContent = String(a); }
           });
           card.querySelector(".cv-qfoot").textContent = "Respondida";
@@ -559,10 +621,25 @@
     const ask = status !== "busy" && status !== "idle";
     t.el.classList.toggle("ask", ask);
     t.el.classList.toggle("working", status === "busy");
+    if (!ask) { t.qTerm = false; t.el.classList.remove("qmode"); }
+    else checkQ(t);
     if (status === "busy" && was !== "busy") t.cv.since = Date.now();
     if (t.cv.refresh) t.cv.refresh();
     if (t === active && ask !== (was !== "busy" && was !== "idle" && was !== undefined)) requestAnimationFrame(() => focusT(t));
   }
+  // si lo que pregunta Claude es una encuesta, se contesta en su tarjeta y la terminal no sale
+  function checkQ(t) {
+    if (!t.cv || t.qTerm) return;
+    // solo si su tarjeta ya está en la conversación (si no, se contesta en la terminal, como antes)
+    const q = /Type something/.test(screenText(t, 30)) && !!t.cv.list.querySelector(".cv-q:not(.done)");
+    t.el.classList.toggle("qmode", q);
+    if (q && t === active) {
+      const f = t.cv.feed; f.scrollTop = f.scrollHeight;
+      const first = t.cv.list.querySelector(".cv-q:not(.done) .cv-qo");
+      if (first && document.activeElement && !document.activeElement.closest(".cv-q")) first.focus({ preventScroll: true });
+    }
+  }
+  setInterval(() => { terms.forEach(t => { if (t.status && t.status !== "busy" && t.status !== "idle") checkQ(t); }); }, 700);
   setInterval(() => {
     const t = active; if (!t || !t.cv || t.status !== "busy") return;
     const s = Math.round((Date.now() - (t.cv.since || Date.now())) / 1000);
@@ -739,6 +816,9 @@
     // una orden de Claude (/compact…) con la caja de escribir vaciada antes y el Intro aparte
     command(key, cmd) { const t = terms.get(key); if (t && !t.exited) send(t, cmd); },
     sessionId: key => (terms.get(key) || {}).sessionId,
+    // lo que se ve ahora en la terminal de Claude (las últimas filas), para leer su estado
+    screen(key, n = 40) { const t = key ? terms.get(key) : active; return t ? screenText(t, n) : ""; },
+    keys(key, d) { const t = key ? terms.get(key) : active; if (t) D.term.write(t.key, d); },
     onStatus: f => statusFns.add(f),
   };
 
