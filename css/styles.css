@@ -668,29 +668,47 @@ html.desktop .s-tabs button, html.desktop .s-tabs .s-idchip { -webkit-app-region
 .dock-item[data-kind="shell"] .glyph { stroke: var(--muted); }
 
 /* lanzador (Ctrl+Espacio dentro, Alt+Espacio desde cualquier sitio) */
-.palette { position: fixed; inset: 0; z-index: 50; display: grid; justify-items: center; align-items: start; padding-top: 14vh; background: rgba(0, 0, 0, .38); }
-:root[data-theme="light"] .palette { background: rgba(20, 20, 30, .14); }
+/* lanzador (tecla Windows): el cielo se apaga y desenfoca detrás; secciones rotuladas como las constelaciones */
+.palette { position: fixed; inset: 0; z-index: 50; display: grid; justify-items: center; align-items: start; padding-top: 12vh; background: rgba(0, 0, 0, .32); backdrop-filter: blur(2.5px); }
+:root[data-theme="light"] .palette { background: rgba(250, 250, 252, .55); }
 .palette[hidden] { display: none; }
-.pal-box { width: min(640px, calc(100vw - 32px)); background: var(--chrome); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
-.pal-field { display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 50px; border-bottom: 1px solid var(--line); cursor: var(--cur-text); }
-.pal-field .ico { width: 15px; height: 15px; fill: none; stroke: var(--muted); stroke-width: 1.4; stroke-linecap: round; flex: none; }
-.pal-field input { flex: 1; min-width: 0; height: 100%; background: none; border: 0; outline: none; font-size: 13.5px; cursor: var(--cur-text); }
+.pal-box { width: min(680px, calc(100vw - 32px)); background: color-mix(in srgb, var(--chrome) 88%, transparent); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: var(--shadow), 0 0 0 1px rgba(0, 0, 0, .4); overflow: hidden; }
+.pal-field { display: flex; align-items: center; gap: 14px; padding: 0 18px; height: 60px; border-bottom: 1px solid var(--line); cursor: var(--cur-text); }
+.pal-field .ico { width: 16px; height: 16px; fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linecap: round; flex: none; transition: transform .6s var(--ease-out); }
+.pal-field:focus-within .ico { transform: rotate(45deg); }
+.pal-field input { flex: 1; min-width: 0; height: 100%; background: none; border: 0; outline: none; font-size: 15px; letter-spacing: -.01em; cursor: var(--cur-text); }
 .pal-field input::placeholder { color: var(--faint); }
-.pal-list { list-style: none; max-height: min(420px, 56vh); overflow-y: auto; padding: 6px; }
-.pal-item { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; cursor: var(--cur-link); }
+.pal-list { list-style: none; max-height: min(460px, 58vh); overflow-y: auto; padding: 4px 8px 10px; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); align-content: start; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.pal-list > li { grid-column: 1 / -1; }
+.pal-sec { display: flex; align-items: center; gap: 10px; padding: 14px 8px 6px; font-size: 9px; letter-spacing: .22em; text-transform: uppercase; color: var(--faint); }
+.pal-sec::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.pal-item { position: relative; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 12px; height: 34px; padding: 0 10px; border-radius: 6px; cursor: var(--cur-link); }
 .pal-item[aria-selected="true"] { background: var(--hover); }
-.pal-item[aria-selected="true"] .pi-kind { color: var(--accent); }
-.pi-ico { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line); background: var(--field); }
-.pi-ico svg { width: 14px; height: 14px; fill: none; stroke: var(--ink-2); stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+.pal-item[aria-selected="true"]::before { content: ""; position: absolute; left: -5px; top: 50%; width: 4px; height: 4px; margin-top: -2px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.pi-ico { display: grid; place-items: center; width: 20px; height: 20px; }
+.pi-ico svg { width: 14px; height: 14px; fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+.pal-item[aria-selected="true"] .pi-ico svg { stroke: var(--ink-2); }
 .pi-ico img { width: 18px; height: 18px; }
-.pal-item[data-kind="sess"] .pi-ico svg { stroke: var(--accent); }
-.pi-txt { display: grid; min-width: 0; }
-.pi-txt b { font-weight: 500; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pi-txt small { color: var(--faint); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal-item[data-kind="sess"] .pi-ico svg, .pal-item[data-kind="sess"][aria-selected="true"] .pi-ico svg { stroke: var(--accent); }
+.pi-txt { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.pi-txt b { flex: none; max-width: 70%; font-weight: 400; font-size: 12.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal-item[aria-selected="true"] .pi-txt b { color: var(--ink); }
+.pi-txt small { min-width: 0; color: var(--faint); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pi-txt small:empty { display: none; }
-.pi-kind { color: var(--faint); font-size: 10.5px; }
-.pal-empty { color: var(--faint); padding: 14px 10px; }
-.pal-foot { display: flex; gap: 16px; padding: 8px 14px; border-top: 1px solid var(--line); color: var(--faint); font-size: 10.5px; }
+.pi-kind { color: var(--faint); font-size: 11px; opacity: 0; transition: opacity var(--t-fast); }
+.pal-item[aria-selected="true"] .pi-kind { opacity: 1; }
+.pal-item.arm .pi-kind { opacity: 1; color: var(--crit); font-size: 10.5px; }
+/* apps sin buscar: cuadrícula de iconos con el nombre debajo */
+.pal-list > li.pal-item.tile { grid-column: auto; display: flex; flex-direction: column; justify-content: center; gap: 8px; height: 84px; padding: 8px 6px; text-align: center; }
+.pal-item.tile .pi-ico { width: 32px; height: 32px; }
+.pal-item.tile .pi-ico img { width: 30px; height: 30px; }
+.pal-item.tile .pi-ico svg { width: 20px; height: 20px; }
+.pal-item.tile .pi-txt { justify-content: center; width: 100%; }
+.pal-item.tile .pi-txt b { max-width: 100%; font-size: 10.5px; }
+.pal-item.tile .pi-kind { display: none; }
+.pal-item.tile[aria-selected="true"]::before { left: 50%; top: auto; bottom: 4px; margin: 0 0 0 -2px; }
+.pal-empty { color: var(--faint); padding: 22px 10px; text-align: center; }
+.pal-foot { display: flex; gap: 18px; padding: 9px 18px; border-top: 1px solid var(--line); color: var(--faint); font-size: 10px; }
 .pal-foot span { display: inline-flex; gap: 4px; align-items: center; }
 .pal-foot .pal-sc { margin-left: auto; }
 /* un terminal suelto (PowerShell) no tiene contexto de Claude */
@@ -706,7 +724,6 @@ html.desktop .s-tabs button, html.desktop .s-tabs .s-idchip { -webkit-app-region
 .win-ctl .fs-in { display: none; }
 html:not(.fullscreen) .win-ctl .fs-out { display: none; }
 html:not(.fullscreen) .win-ctl .fs-in { display: inline; }
-.pal-list { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
 /* barra de tareas: ventanas de otras apps */
 .appbar { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 0 1 auto; margin-right: auto; overflow: hidden; margin-left: -8px; padding-left: 8px; border-left: 1px solid var(--line); }
 .appbar.empty { display: none; }

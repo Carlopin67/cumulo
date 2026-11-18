@@ -357,12 +357,12 @@
   pal.innerHTML = `
     <div class="pal-box" role="dialog" aria-label="Lanzador">
       <label class="pal-field">
-        <svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4 14 14"/></svg>
-        <input type="text" placeholder="Abrir una app, un archivo, una sesión o una acción… (tecla Windows)" spellcheck="false" autocomplete="off" aria-label="Buscar">
+        <svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8v12.4M1.8 8h12.4M3.6 3.6l8.8 8.8M12.4 3.6l-8.8 8.8"/></svg>
+        <input type="text" placeholder="Busca una app, un archivo o una sesión" spellcheck="false" autocomplete="off" aria-label="Buscar">
         <kbd>Esc</kbd>
       </label>
       <ul class="pal-list" role="listbox"></ul>
-      <p class="pal-foot"><span><kbd>↑</kbd><kbd>↓</kbd> elegir</span><span><kbd>↵</kbd> abrir</span><span><kbd>Ctrl</kbd><kbd>↵</kbd> mostrar en carpeta</span><span class="pal-sc"></span></p>
+      <p class="pal-foot"><span><kbd>↑</kbd><kbd>↓</kbd> elegir</span><span><kbd>↵</kbd> abrir</span><span><kbd>Ctrl</kbd><kbd>↵</kbd> en su carpeta</span><span class="pal-sc"></span></p>
     </div>`;
   document.body.append(pal);
   const pIn = pal.querySelector("input"), pList = pal.querySelector(".pal-list");
@@ -423,16 +423,27 @@
       out.push(...pick(sess, s => s.title + " " + s.project, 5).map(s => ({ kind: "sess", icon: "star", name: s.title, hint: s.projectName || s.project.split(/[\\/]/).pop(), id: s.id })));
       out.push(...(files || []).map(f => ({ kind: f.dir ? "dir" : "file", icon: f.dir ? "dir" : "file", name: f.name, hint: f.path, path: f.path })));
     }
-    return out;
+    // secciones con rótulo (como las constelaciones del mapa); sin buscar, las apps van en cuadrícula
+    return out.map(x => ({ ...x, sec: SEC[x.kind], tile: !q && x.kind === "app" }));
   }
-  const LABEL = { app: "App", act: "Acción", sess: "Sesión", dir: "Carpeta", file: "Archivo", win: "Abierta" };
+  const SEC = { win: "Ventanas abiertas", act: "Acciones", sess: "Sesiones", app: "Apps", dir: "Archivos", file: "Archivos" };
+  let els = []; // <li> de cada elemento, en el mismo orden que items
   function render() {
-    pList.innerHTML = "";
+    pList.innerHTML = ""; els = [];
+    let last = null;
     items.forEach((it, i) => {
-      const li = document.createElement("li"); li.role = "option"; li.className = "pal-item"; li.dataset.kind = it.kind;
+      if (it.sec !== last) {
+        last = it.sec;
+        const h = document.createElement("li"); h.className = "pal-sec"; h.setAttribute("role", "presentation");
+        h.textContent = it.sec; pList.append(h);
+      }
+      const li = document.createElement("li"); li.role = "option"; li.className = "pal-item" + (it.tile ? " tile" : ""); li.dataset.kind = it.kind;
       li.setAttribute("aria-selected", String(i === sel));
-      li.innerHTML = `<span class="pi-ico"><svg viewBox="0 0 16 16" aria-hidden="true">${I[it.icon]}</svg></span><span class="pi-txt"><b></b><small></small></span><span class="pi-kind">${it.confirmArm ? "Pulsa otra vez" : LABEL[it.kind]}</span>`;
-      li.querySelector("b").textContent = it.name; li.querySelector("small").textContent = it.hint || "";
+      li.innerHTML = `<span class="pi-ico"><svg viewBox="0 0 16 16" aria-hidden="true">${I[it.icon]}</svg></span><span class="pi-txt"><b></b><small></small></span><span class="pi-kind">${it.confirmArm ? "Pulsa otra vez" : "↵"}</span>`;
+      if (it.confirmArm) li.classList.add("arm");
+      li.querySelector("b").textContent = it.name; li.querySelector("small").textContent = it.tile ? "" : it.hint || "";
+      if (it.tile) li.title = it.name;
+      els.push(li);
       if ((it.kind === "app" || it.kind === "win") && it.path) D.icon(it.path).then(u => { if (u) li.querySelector(".pi-ico").innerHTML = `<img alt="" src="${u}">`; });
       li.onmousemove = () => { if (sel !== i) { sel = i; mark(); } };
       li.onclick = e => exec(it, e.ctrlKey);
@@ -440,7 +451,36 @@
     });
     if (!items.length) pList.innerHTML = `<li class="pal-empty">Nada con ese nombre</li>`;
   }
-  function mark() { [...pList.children].forEach((li, i) => li.setAttribute("aria-selected", String(i === sel))); const c = pList.children[sel]; if (c) c.scrollIntoView({ block: "nearest" }); }
+  function mark() {
+    els.forEach((li, i) => li.setAttribute("aria-selected", String(i === sel)));
+    const c = els[sel]; if (!c) return;
+    // al volver arriba del todo se ve también el rótulo de la sección
+    const prev = c.previousElementSibling;
+    (prev && prev.classList.contains("pal-sec") ? prev : c).scrollIntoView({ block: "nearest" });
+    if (prev !== c) c.scrollIntoView({ block: "nearest" });
+  }
+  // flechas por posición en pantalla: en la lista va fila a fila y en la cuadrícula de apps, por columnas
+  function move(dir) {
+    if (!els.length) return;
+    const r = els[sel].getBoundingClientRect(), cx = items[sel].tile ? r.left + r.width / 2 : r.left; // desde una fila se entra por la primera app
+    if (dir === "left" || dir === "right") {
+      if (!items[sel].tile) return false;
+      const j = sel + (dir === "right" ? 1 : -1);
+      if (items[j] && items[j].tile) { sel = j; mark(); }
+      return true;
+    }
+    let best = -1, bd = Infinity;
+    els.forEach((li, i) => {
+      if (i === sel) return;
+      const b = li.getBoundingClientRect();
+      const dy = dir === "down" ? b.top - r.bottom : r.top - b.bottom;
+      if (dy < -2) return;
+      const d = dy * 10 + Math.abs(b.left + b.width / 2 - cx);
+      if (d < bd) { bd = d; best = i; }
+    });
+    sel = best >= 0 ? best : dir === "down" ? 0 : els.length - 1;
+    mark(); return true;
+  }
   function refresh() {
     items = compute(); sel = 0; render();
     const q = pIn.value.trim(), my = ++findSeq;
@@ -471,8 +511,9 @@
   }
   pIn.addEventListener("input", refresh);
   pIn.addEventListener("keydown", e => {
-    if (e.key === "ArrowDown") { e.preventDefault(); sel = (sel + 1) % Math.max(1, items.length); mark(); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); sel = (sel - 1 + items.length) % Math.max(1, items.length); mark(); }
+    if (e.key === "ArrowDown") { e.preventDefault(); move("down"); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); move("up"); }
+    else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !pIn.value && items[sel] && items[sel].tile) { e.preventDefault(); move(e.key === "ArrowLeft" ? "left" : "right"); }
     else if (e.key === "Enter") { e.preventDefault(); if (items[sel]) exec(items[sel], e.ctrlKey); }
     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closePal(); }
   });
