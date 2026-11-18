@@ -1,7 +1,7 @@
 // Puente entre la web del lanzador y el ordenador. La web funciona igual sin esto (modo simulación);
 // con esto, los datos y los terminales son de verdad.
 "use strict";
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 const path = require("path");
 
 let data = { sessions: [], chats: [] };
@@ -71,6 +71,8 @@ contextBridge.exposeInMainWorld("cumuloDesktop", {
   reloadData: () => ipcRenderer.invoke("data:read"),
   open: target => ipcRenderer.invoke("os:open", target),
   saveImage: (bytes, ext) => ipcRenderer.invoke("clip:save", bytes, ext),
+  // ruta de un archivo arrastrado (Electron ya no la pone en File.path)
+  pathFor: f => { try { return webUtils.getPathForFile(f) || ""; } catch { return ""; } },
   home: process.env.USERPROFILE || "",
   reveal: target => ipcRenderer.invoke("os:reveal", target),
   apps: () => ipcRenderer.invoke("os:apps"),

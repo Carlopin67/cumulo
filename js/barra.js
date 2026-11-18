@@ -70,7 +70,9 @@
   const lvl = u => u >= 0.9 ? "crit" : u >= 0.7 ? "warn" : "";
   function usage(v) {
     const l = v && v.limits; if (!l || !l.five_hour || !l.seven_day) return;
-    const se = l.five_hour.used_percentage / 100, wk = l.seven_day.used_percentage / 100;
+    // una ventana que ya se reinició vale 0 hasta que Claude escriba el dato nuevo (como en el panel de Cúmulo)
+    const pct = x => x.resets_at * 1000 > Date.now() ? (x.used_percentage || 0) / 100 : 0;
+    const se = pct(l.five_hour), wk = pct(l.seven_day);
     const arc = (el, u) => { el.style.strokeDasharray = `${Math.max(0.5, u * 100).toFixed(1)} 100`; el.setAttribute("class", "mo-arc " + lvl(u)); };
     arc($("moWeekly"), wk); arc($("moSession"), se);
     $("moText").textContent = `${Math.round(se * 100)} % · ${Math.round(wk * 100)} %`;

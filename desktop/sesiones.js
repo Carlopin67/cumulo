@@ -28,6 +28,12 @@ function promptText(o) {
   return fixEncoding(t);
 }
 
+// como título, el primer mensaje sin las rutas de adjuntos (@"C:\…\uploads\…")
+function cleanPrompt(t) {
+  const r = t.replace(/@"[^"]*"|@\S+[\\/]\S+/g, " ").replace(/\s+/g, " ").trim();
+  return r || "Imagen o archivo adjunto";
+}
+
 function readSession(file) {
   const st = fs.statSync(file);
   const hit = cache.get(file);
@@ -73,14 +79,16 @@ function readSession(file) {
   // proyecto: la carpeta donde se abrió; si fue la carpeta personal o una temporal, el proyecto que más tocó
   let project = cwd || HOME, projectName = null;
   const inProy = PROY.exec(project);
-  if (!inProy) {
+  // abierta en una subcarpeta (Proyectos\cumulo\desktop): cuenta como el proyecto (Proyectos\cumulo)
+  if (inProy) project = project.slice(0, inProy.index + inProy[0].length);
+  else {
     const best = [...proj.entries()].sort((a, b) => b[1] - a[1])[0];
     if (best && best[1] >= 3) { project = path.join(HOME, "Proyectos", best[0]); }
     else { project = HOME; projectName = "General"; }
   }
   const data = {
     id, cwd: cwd || HOME,
-    title: fixEncoding(title || aiTitle || first).replace(/\s+/g, " ").slice(0, 70),
+    title: fixEncoding(title || aiTitle || cleanPrompt(first)).replace(/\s+/g, " ").slice(0, 70),
     project, projectName: projectName || undefined,
     started, lastActive: last || started,
     messages: prompts + replies,

@@ -32,6 +32,8 @@ ipcMain.on("app:paths", e => { e.returnValue = { xterm: XTERM }; });
 ipcMain.handle("clip:save", (_e, bytes, ext) => {
   const dir = path.join(os.tmpdir(), "cumulo-imagenes");
   fs.mkdirSync(dir, { recursive: true });
+  // las de hace más de un día ya se adjuntaron: fuera, para no llenar la carpeta temporal
+  try { for (const n of fs.readdirSync(dir)) { const f = path.join(dir, n); if (Date.now() - fs.statSync(f).mtimeMs > 86400000) fs.unlinkSync(f); } } catch { /* en uso */ }
   const f = path.join(dir, "imagen-" + Date.now() + "." + (/^(png|jpe?g|gif|webp|bmp)$/.test(ext) ? ext : "png"));
   fs.writeFileSync(f, Buffer.from(bytes));
   return f;
@@ -69,7 +71,7 @@ const terms = new Map(); // key → { p, key, sessionId }
 function send(ch, ...a) { if (win && !win.isDestroyed()) win.webContents.send(ch, ...a); }
 function sendBar(ch, ...a) { if (bar && !bar.isDestroyed() && bar.isVisible()) bar.webContents.send(ch, ...a); }
 
-ipcMain.handle("term:open", (_e, { key, sessionId, cwd, cols, rows, shellOnly }) => {
+ipcMain.handle("term:open", async (_e, { key, sessionId, cwd, cols, rows, shellOnly }) => {
   const t = terms.get(key);
   if (t) { try { t.p.resize(cols, rows); } catch { /* ya cerrado */ } return { pid: t.p.pid, reused: true, buffer: t.buf.join("") }; }
   const dir = cwd && fs.existsSync(cwd) ? cwd : os.homedir();
@@ -90,6 +92,8 @@ ipcMain.handle("term:open", (_e, { key, sessionId, cwd, cols, rows, shellOnly })
   });
   // si ya se cerró a mano (o se abrió otra con la misma clave), este aviso llega tarde y no debe tocar la nueva
   p.onExit(({ exitCode }) => { if (terms.get(key) !== rec) return; terms.delete(key); send("term:exit", key, exitCode); });
+  // con ConPTY el pid llega un instante después de crear el terminal: sin él no se sabría el estado de la sesión
+  for (let i = 0; i < 60 && !p.pid; i++) await new Promise(r => setTimeout(r, 50));
   return { pid: p.pid, reused: false, buffer: "" };
 });
 ipcMain.on("term:write", (_e, key, d) => { const t = terms.get(key); if (t) { try { t.p.write(d); } catch { /* cerrándose */ } } });
@@ -108,7 +112,12 @@ function readLive() {
   try {
     for (const f of fs.readdirSync(dir)) {
       if (!f.endsWith(".json")) continue;
-      try { const j = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")); out.push({ pid: j.pid, sessionId: j.sessionId, status: j.status, cwd: j.cwd, updatedAt: j.updatedAt }); } catch { /* escribiéndose */ }
+      try {
+        const j = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+        // un Claude cerrado a la fuerza deja su archivo; Windows reutiliza los pid: sin esto se confundirían sesiones
+        try { process.kill(j.pid, 0); } catch { continue; }
+        out.push({ pid: j.pid, sessionId: j.sessionId, status: j.status, cwd: j.cwd, updatedAt: j.updatedAt });
+      } catch { /* escribiéndose */ }
     }
   } catch { /* no existe todavía */ }
   // la barra de estado puede estar escribiendo el archivo justo ahora: entonces vale lo último bueno
@@ -199,7 +208,7 @@ function monitorLoop() {
   if (!monitorOn || !win || !win.isVisible() || win.isMinimized()) return; // nadie lo mira: no se gasta nada
   sysTick();
   if (tickN % 15 === 0) gpuTick(); // solo para la memoria total y la temperatura de la NVIDIA
-  if (tickN % 3 === 0 && !contadores.read()) netTick();
+  if (tickN % 3 === 0 && !contadores.read()) { netTick(); contadores.setActive(true, app.getPath("userData")); } // si el lector se cayó, vuelve (como mucho uno cada 15 s)
   if (tickN % 6 === 0) claudeTick();
   if (tickN % 120 === 0) diskTick();
 }
@@ -314,7 +323,7 @@ ipcMain.handle("cfg:set", (_e, patch) => {
   saveCfg();
   return cfg;
 });
-ipcMain.on("win:fullscreen", () => { if (win) win.setFullScreen(!win.isFullScreen()); });
+ipcMain.on("win:fullscreen", () => { if (win && !SHELL) win.setFullScreen(!win.isFullScreen()); }); // como escritorio, siempre completa
 // Como escritorio, Cúmulo nunca se minimiza (detrás no hay nada y la pantalla se quedaba gris):
 // «minimizar» y «cerrar» lo mandan detrás, trayendo delante la última app abierta; si no hay ninguna, se queda.
 async function toBack() {
@@ -353,12 +362,14 @@ function createWindow() {
   win.loadFile(path.join(WEB, "index.html"));
   win.once("ready-to-show", () => { win.setFullScreen(true); win.show(); });
   win.on("enter-full-screen", () => send("win:state", true));
-  win.on("leave-full-screen", () => send("win:state", false));
+  // como escritorio no hay nada detrás: si una app (un juego, un cambio de resolución…) lo saca de pantalla completa,
+  // se quedaba una ventana pequeña con su barra en medio y la barra de abajo: dos barras. Vuelve enseguida.
+  win.on("leave-full-screen", () => { send("win:state", false); if (SHELL) setTimeout(() => { if (win && !win.isDestroyed() && !win.isFullScreen()) win.setFullScreen(true); }, 150); });
   // enlaces externos al navegador, nunca dentro de la app
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: "deny" }; });
   win.webContents.on("will-navigate", (e, url) => { if (!url.startsWith("file:")) { e.preventDefault(); shell.openExternal(url); } });
   win.webContents.on("before-input-event", (e, i) => {
-    if (i.type === "keyDown" && i.key === "F11") { e.preventDefault(); win.setFullScreen(!win.isFullScreen()); }
+    if (i.type === "keyDown" && i.key === "F11") { e.preventDefault(); if (!SHELL) win.setFullScreen(!win.isFullScreen()); }
     if (i.type === "keyDown" && i.key === "F12") win.webContents.toggleDevTools();
     if (i.type === "keyDown" && i.control && i.key.toLowerCase() === "r" && i.shift) win.webContents.reload();
   });
@@ -413,7 +424,13 @@ function createBar() {
   bar.setAlwaysOnTop(true, "screen-saver");
   bar.loadFile(path.join(WEB, "barra.html"));
   bar.once("ready-to-show", () => { placeBar(); syncBar(); });
-  screen.on("display-metrics-changed", placeBar);
+  // cambio de resolución o de escala (algunos juegos y apps lo hacen): barra y Cúmulo vuelven a su sitio
+  // (solo si cambia la pantalla de verdad: reservar la franja de la barra también avisa, y eso no debe repetirse)
+  screen.on("display-metrics-changed", (_e, _d, changed) => {
+    placeBar();
+    if (!changed.some(c => c === "bounds" || c === "scaleFactor")) return;
+    if (win && !win.isDestroyed()) { win.setFullScreen(false); win.setFullScreen(true); }
+  });
   ["focus", "blur", "minimize", "restore", "hide", "show"].forEach(ev => win.on(ev, () => setTimeout(syncBar, 30)));
 }
 ipcMain.on("bar:cumulo", () => bringFront());

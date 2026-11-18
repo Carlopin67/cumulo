@@ -1693,7 +1693,7 @@
       // la orden y el Intro por separado: juntos, Claude lo toma como texto pegado y no lo ejecuta
       if (current.s.shell) return; // en un terminal de PowerShell no hay nada que compactar
       const key = current.s.termKey || current.s.id;
-      window.cumuloTerm.send(key, "/compact"); setTimeout(() => window.cumuloTerm.send(key, "\r"), 250);
+      window.cumuloTerm.command(key, "/compact");
       window.cumuloTerm.focus(); return;
     }
     if (!m || ctxBtn.classList.contains("busy")) return;
@@ -1757,7 +1757,9 @@
   });
 
   // estado real de las sesiones abiertas en la barra de tareas
-  if (DESK && window.cumuloTerm) {
+  // (escritorio.js, que crea cumuloTerm, se carga después que este archivo: se engancha al terminar de cargar)
+  if (DESK) addEventListener("DOMContentLoaded", () => {
+    if (!window.cumuloTerm) return;
     window.cumuloTerm.onStatus((key, st, sid) => {
       const o = opened.find(x => (x.s.termKey || x.s.id) === key); if (!o) return;
       if (st === "id") { if (o.s.pseudo && sid) { o.s.id = sid; if (current && current.s === o.s) $("sId").textContent = sid; } return; }
@@ -1767,7 +1769,7 @@
       else dockState(o, "");
     });
     $("sBack").title = "Volver al cúmulo (Alt+←)"; $("sBack").setAttribute("aria-label", "Volver al cúmulo (Alt+←)");
-  }
+  });
   // para el lanzador: abrir una sesión por id y abrir un terminal
   window.cumulo = {
     openById(id) {
@@ -1777,7 +1779,79 @@
       if (s.plane !== P) { switchPlane(s.plane.kind); setTimeout(go, reduced() ? 0 : 700); } else go();
     },
     openShell() { if (P.kind !== "code") switchPlane("code"); openSession(newPseudo(projList[0], true)); },
+    sessions: () => PLANES.code.sessions, // también las que han nacido después de abrir Cúmulo
   };
+
+  // ── sesiones nuevas en vivo (app instalable) ─────────────────
+  // Lo que se crea dentro de Cúmulo (o fuera) aparece como estrella sin reiniciar, en el sitio exacto
+  // donde caería al volver a abrir Cúmulo: mismas tiradas que buildPlane, añadida al final por fecha.
+  function addStar(d) {
+    const plane = PLANES.code, key = d.project || "Sin proyecto";
+    let p = plane.projList.find(x => x.path === key);
+    if (!p) { // proyecto nuevo: un cúmulo más en la espiral, en el primer hueco libre
+      const i = plane.projList.length;
+      p = { path: key, name: d.projectName || folderName(key), sessions: [], radius: 46 * Math.sqrt(1.4) + 24, la: 0, plane,
+        cd: PAL_DARK[i % PAL_DARK.length], cl: PAL_LIGHT[i % PAL_LIGHT.length] };
+      const a = i * GA + 0.7; let r = 60 + 30 * Math.sqrt(i);
+      for (let tries = 0; tries < 400; tries++) {
+        const x = Math.cos(a) * r, y = Math.sin(a) * r * 0.78;
+        if (plane.projList.every(o => Math.hypot(o.x - x, o.y - y) > o.radius + p.radius + 6)) break;
+        r += 6;
+      }
+      p.x = Math.cos(a) * r; p.y = Math.sin(a) * r * 0.78;
+      plane.projList.push(p);
+    }
+    const k = p.sessions.length, R = rng(hash("code" + p.path));
+    for (let n = 0; n < k * 4; n++) R();
+    const s = { ...d };
+    const rr = 46 * Math.sqrt(k + 0.4) + R() * 20, aa = k * GA + R() * 0.9;
+    s.x = p.x + Math.cos(aa) * rr; s.y = p.y + Math.sin(aa) * rr; s.proj = p; s.plane = plane;
+    const lm = Math.log2(1 + (s.messages || 1));
+    s.age = 0; s.rec = 1; s.size = (1.3 + lm * 0.5) * 1.12; s.spike = clamp((lm - 4.3) / 2.2, 0, 1);
+    s.glow = 1; s.twAmp = 0.33; s.twSp = 2.3; s.live = true;
+    s.twinkle = R() * Math.PI * 2; s.pulsePhase = R() * 4; s.dim = 0; s.foc = 0; s.la = 0;
+    s.delay = introT0 === null ? 0 : tNow - introT0 + 0.2; // nace ahora, con la animación de nacer
+    s.links = [];
+    p.radius = Math.max(p.radius, rr + 20);
+    // hilo con la estrella más cercana del mismo proyecto
+    let best = null, bd = Infinity;
+    p.sessions.forEach(o => { const dd = Math.hypot(o.x - s.x, o.y - s.y); if (dd < bd) { bd = dd; best = o; } });
+    p.sessions.push(s); plane.sessions.push(s); ALL.push(s); byId.set(s.id, s);
+    if (best) { const n0 = plane.links.length; addLink(best, s, "chain"); const l = plane.links[n0]; if (l) { s.links.push(l); best.links.push(l); } }
+    return s;
+  }
+  let refreshing = false;
+  async function refreshSessions() {
+    if (refreshing || !DESK || !DESK.reloadData) return;
+    refreshing = true;
+    try {
+      const d = await DESK.reloadData();
+      (d && d.sessions || []).forEach(n => {
+        const s = byId.get(n.id);
+        if (!s) { addStar(n); return; }
+        if (s.plane.kind !== "code") return;
+        s.title = n.title; s.messages = n.messages; s.lastActive = n.lastActive; s.firstPrompt = n.firstPrompt;
+      });
+      // una sesión nueva abierta aquí ya tiene estrella: la pestaña y la barra pasan a ser de esa estrella
+      // (mismo terminal; así al volver se vuela a ella y no se abre un Claude repetido al pulsarla)
+      opened.forEach(o => {
+        if (!o.s.pseudo || !o.s.id) return;
+        const star = byId.get(o.s.id); if (!star) return;
+        star.termKey = o.s.termKey;
+        if (current && current.s === o.s) { current.s = star; current.proj = star.proj; $("sTitle").textContent = star.title; }
+        o.s = star;
+        if (star.proj) { o.el.style.setProperty("--cd", star.proj.cd); o.el.style.setProperty("--cl", star.proj.cl); }
+      });
+      opened.forEach(o => { o.el.querySelector(".t").textContent = o.s.title; dockState(o, o.state); });
+      if (current && current.s && !current.s.pseudo) $("sTitle").textContent = current.s.title;
+      if (selected && panel.classList.contains("open")) { $("pTitle").textContent = selected.title; $("pMsgs").textContent = selected.messages; $("pLast").textContent = ago(selected.lastActive); }
+    } catch { /* se intenta en la siguiente */ }
+    refreshing = false;
+  }
+  if (DESK) {
+    setInterval(() => { if (!document.hidden) refreshSessions(); }, 30000);
+    addEventListener("DOMContentLoaded", () => { if (window.cumuloTerm) window.cumuloTerm.onStatus((key, st) => { if (st === "id" || st === "done" || st === "exit") setTimeout(refreshSessions, 1500); }); });
+  }
 
   window.addEventListener("resize", resize);
   resize();

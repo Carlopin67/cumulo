@@ -395,7 +395,8 @@
   // Como `/context` de Claude Code: 100 casillas (1 % = 10k tokens cada una) repartidas por categorías.
   // Simulado a partir de la sesión; la versión instalable lo leerá de la sesión real.
   // Desde app.js: window.cumuloMonitor.setSession(sesión | null) y .addMessage(caracteres, imágenes).
-  const CTX_TOTAL = 1000000, CTX_RESERVE = 45000; // ventana de 1M de tokens; reserva antes de autocompactar
+  const CTX_RESERVE = 45000; // reserva antes de autocompactar
+  let CTX_TOTAL = 1000000; // ventana del modelo: 1M salvo que Claude diga otra
   const CTX_CATS = [
     { k: "system", label: "Sistema", a: 0.3 },
     { k: "tools", label: "Herramientas", a: 0.45 },
@@ -418,6 +419,7 @@
 
   function renderContext(fresh) {
     if (!ctx) return;
+    ctxEl.querySelector(".ctx-of").textContent = " / " + (CTX_TOTAL % 1e6 === 0 ? CTX_TOTAL / 1e6 + "M" : CTX_TOTAL % 1000 === 0 ? CTX_TOTAL / 1000 + "k" : kfmt(CTX_TOTAL));
     const used = CTX_CATS.reduce((a, c) => a + ctx[c.k], 0);
     const free = Math.max(0, CTX_TOTAL - CTX_RESERVE - used);
     ctxEl.querySelector(".ctx-used").textContent = kfmt(used);
@@ -460,6 +462,7 @@
     usage,
     setSession(s) {
       LIMITS.forEach(L => { L.shown = 0; L.shownT = 0; }); // las órbitas se vuelven a trazar al entrar
+      CTX_TOTAL = 1000000;
       const msgs = s ? s.messages : 0;
       const seed = s && s.id ? s.id.charCodeAt(0) + s.id.charCodeAt(1) : 7;
       ctx = {
@@ -469,8 +472,9 @@
       if (s && s.context) this.setContext(s.context, true); else renderContext(true);
     },
     // contexto real (app instalable): el total viene de Claude; lo fijo se reparte como en /context
-    setContext(tokens, fresh) {
+    setContext(tokens, fresh, size) {
       if (!ctx || !tokens) return;
+      if (size > 0) CTX_TOTAL = size;
       const fixed = ctx.system + ctx.tools + ctx.mcp + ctx.memory;
       ctx.messages = Math.max(0, tokens - fixed);
       renderContext(!!fresh);

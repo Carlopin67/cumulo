@@ -23,7 +23,10 @@
   };
   document.querySelector(".titlebar .tb-right").append(winBtns());
   document.querySelector("#session .s-tools").append(winBtns());
-  if (D.isShell) document.querySelectorAll('.win-ctl [data-a="min"], .win-ctl [data-a="hide"]').forEach(b => { b.title = "Mandar detrás (Cúmulo es tu escritorio: no se cierra)"; });
+  if (D.isShell) {
+    document.querySelectorAll('.win-ctl [data-a="min"], .win-ctl [data-a="hide"]').forEach(b => { b.title = "Mandar detrás (Cúmulo es tu escritorio: no se cierra)"; });
+    document.querySelectorAll('.win-ctl [data-a="fs"]').forEach(b => b.remove()); // como escritorio siempre va a pantalla completa
+  }
   const setFs = v => {
     root.classList.toggle("fullscreen", v);
     document.querySelectorAll('.win-ctl [data-a="fs"]').forEach(b => { b.title = v ? "Salir de pantalla completa (F11)" : "Pantalla completa (F11)"; });
@@ -85,7 +88,7 @@
     // imágenes dentro de la terminal (sixel e iTerm: imgcat, chafa, viu…)
     if (window.ImageAddon) { try { xt.loadAddon(new window.ImageAddon.ImageAddon({ sixelSizeLimit: 8e6 })); } catch { /* sin imágenes */ } }
     imageLinks(xt, opts.cwd);
-    const t = { key, xt, fit, el, pid: 0, sessionId: opts.sessionId || null, exited: false, opts };
+    const t = { key, xt, fit, el, pid: 0, sessionId: opts.sessionId || null, exited: false, opts, createdAt: Date.now() };
     terms.set(key, t);
     // copiar con selección, pegar texto; si el portapapeles solo tiene una imagen, Claude la lee con Alt+V
     xt.attachCustomKeyEventHandler(e => {
@@ -165,7 +168,8 @@
   }
 
   // rutas de imágenes que escribe Claude: al pasar el ratón se ve la imagen; con clic se abre
-  const RX_IMG = /(?:[A-Za-z]:[\\/]|~[\\/]|\.{1,2}[\\/])?[\w\-.~()\\/À-ÿ]*?[\w\-.~()À-ÿ]+\.(?:png|jpe?g|gif|webp|bmp|svg|avif)\b/gi;
+  // con letra de unidad se admiten espacios (C:\Mis fotos\a.png); las relativas, no (cortarían la frase de delante)
+  const RX_IMG = /[A-Za-z]:[\\/][^"'<>|*?\r\n:]*?\.(?:png|jpe?g|gif|webp|bmp|svg|avif)\b|(?:~[\\/]|\.{1,2}[\\/])?[\w\-.~()\\/À-ÿ]*?[\w\-.~()À-ÿ]+\.(?:png|jpe?g|gif|webp|bmp|svg|avif)\b/gi;
   const peek = document.createElement("div"); peek.className = "xt-peek"; peek.hidden = true;
   const peekImg = document.createElement("img"); peek.append(peekImg); document.body.append(peek);
   peekImg.onerror = () => { peek.hidden = true; };
@@ -208,7 +212,7 @@
   host.addEventListener("dragover", e => { e.preventDefault(); });
   host.addEventListener("drop", e => {
     e.preventDefault(); if (!active) return;
-    const paths = [...e.dataTransfer.files].map(f => f.path).filter(Boolean);
+    const paths = [...e.dataTransfer.files].map(f => D.pathFor(f)).filter(Boolean);
     if (paths.length) { active.xt.paste(paths.map(p => /\s/.test(p) ? `"${p}"` : p).join(" ")); active.xt.focus(); }
   });
 
@@ -220,11 +224,15 @@
     terms.forEach(t => {
       if (!t.pid || t.exited || t.opts.shell) return;
       const L = v.live.find(x => x.pid === t.pid); if (!L) return;
-      if (L.sessionId && L.sessionId !== t.sessionId) { t.sessionId = L.sessionId; emit(t, "id"); }
+      if (L.sessionId && L.sessionId !== t.sessionId) {
+        // una sesión nueva nunca puede ser una que ya existía antes de abrir su terminal
+        const old = !t.opts.sessionId && window.cumulo && window.cumulo.sessions && window.cumulo.sessions().find(s => s.id === L.sessionId && new Date(s.started) < t.createdAt - 60000);
+        if (!old) { t.sessionId = L.sessionId; emit(t, "id"); }
+      }
       const prev = lastStatus.get(t.key); lastStatus.set(t.key, L.status);
       if (prev !== L.status) emit(t, L.status === "busy" ? "working" : L.status === "idle" ? (prev === "busy" ? "done" : "idle") : "ask");
       const c = v.context && t.sessionId && v.context[t.sessionId];
-      if (c && t === active && window.cumuloMonitor && window.cumuloMonitor.setContext) window.cumuloMonitor.setContext(c.tokens);
+      if (c && t === active && window.cumuloMonitor && window.cumuloMonitor.setContext) window.cumuloMonitor.setContext(c.tokens, false, c.size);
       t.ctx = c;
       if (t === active) claudeBox(t, c, L.status);
     });
@@ -243,7 +251,6 @@
   const cbModel = document.getElementById("cbModel"), cbEffort = document.getElementById("cbEffort");
   const cbTip = document.getElementById("cbTip"), cbSub = document.getElementById("cbSub");
   const fmtK = n => n >= 1e6 ? (n / 1e6).toFixed(2).replace(".", ",") + " M" : n >= 1e3 ? Math.round(n / 1e3) + " mil" : String(n);
-  let wanted = null; // lo que acabas de elegir, hasta que Claude lo confirme
   function segButtons(box, items, kind) {
     box.querySelectorAll("button").forEach(b => b.remove());
     items.forEach(([val, label, title]) => {
@@ -267,9 +274,12 @@
     }
   }
   // el comando se teclea y el Intro va aparte: si va todo junto, Claude lo toma como texto pegado y no lo ejecuta
+  // antes se vacía la caja de escribir (Ctrl+E al final y Ctrl+U borra la línea): si había algo a medio
+  // escribir, el comando se pegaba detrás y se mandaba como mensaje («b/model …»)
   function send(t, cmd) {
-    D.term.write(t.key, cmd);
-    setTimeout(() => D.term.write(t.key, "\r"), 250);
+    D.term.write(t.key, "\x05\x15");
+    setTimeout(() => D.term.write(t.key, cmd), 120);
+    setTimeout(() => D.term.write(t.key, "\r"), 400);
   }
   const queued = new Map(); // terminal -> órdenes elegidas mientras Claude trabajaba
   function choose(kind, val) {
@@ -278,7 +288,7 @@
     if (active.busy) {
       const q = queued.get(active) || {}; q[kind] = cmd; queued.set(active, q);
     } else send(active, cmd);
-    wanted = { kind, val, at: Date.now() + (active.busy ? 600000 : 0) };
+    active.wanted = { kind, val, at: Date.now() + (active.busy ? 600000 : 0) }; // lo elegido, hasta que Claude lo confirme (de cada terminal)
     markBox(kind === "model" ? cbModel : cbEffort, val);
     cbBox.classList.add("pending-" + kind);
     cbSub.textContent = active.busy ? "se aplica al terminar" : "";
@@ -286,6 +296,7 @@
   }
   function claudeBox(t, c, status) {
     t.busy = status === "busy";
+    const wanted = t.wanted;
     const q = queued.get(t);
     if (!t.busy && q) {
       queued.delete(t);
@@ -305,11 +316,12 @@
       markBox(box, val); cbBox.classList.remove("pending-" + kind);
     }
     if (c) {
-      const n = c.tokens || 0;
-      cbTip.className = "cb-tip" + (n >= 400000 ? " crit" : n >= 150000 ? " warn" : "");
-      cbTip.innerHTML = n >= 400000
+      // umbrales pensados para 1M; con una ventana más pequeña se avisa antes (a la misma proporción)
+      const n = c.tokens || 0, k = Math.min(1, (c.size || 1e6) / 1e6), crit = 400000 * k, warn = 150000 * k;
+      cbTip.className = "cb-tip" + (n >= crit ? " crit" : n >= warn ? " warn" : "");
+      cbTip.innerHTML = n >= crit
         ? `<b>Empieza un chat nuevo.</b> Cada mensaje relee ${fmtK(n)} fichas y gasta mucho plan.`
-        : n >= 150000
+        : n >= warn
         ? `<b>Chat largo.</b> Si cambias de tema, mejor uno nuevo o «Compactar».`
         : `<b>Chat ligero.</b> Puedes seguir en este sin problema.`;
     } else cbTip.textContent = "Se completa al primer mensaje de Claude.";
@@ -347,6 +359,8 @@
       t.xt.dispose(); t.el.remove(); terms.delete(key); if (active === t) active = null;
     },
     send(key, text) { D.term.write(key, text); },
+    // una orden de Claude (/compact…) con la caja de escribir vaciada antes y el Intro aparte
+    command(key, cmd) { const t = terms.get(key); if (t && !t.exited) send(t, cmd); },
     sessionId: key => (terms.get(key) || {}).sessionId,
     onStatus: f => statusFns.add(f),
   };
@@ -387,7 +401,7 @@
     { kind: "act", icon: "dir", name: "Explorador de archivos", hint: "Tu carpeta personal", run: () => D.power("explorer") },
     { kind: "act", icon: "act", name: "Configuración de Windows", run: () => D.power("settings") },
     { kind: "act", icon: "act", name: "Administrador de tareas", run: () => D.power("taskmgr") },
-    { kind: "act", icon: "act", name: root.classList.contains("fullscreen") ? "Salir de pantalla completa" : "Pantalla completa", hint: "F11 · al abrir Cúmulo siempre vuelve a pantalla completa", run: () => D.toggleFullscreen() },
+    ...(D.isShell ? [] : [{ kind: "act", icon: "act", name: root.classList.contains("fullscreen") ? "Salir de pantalla completa" : "Pantalla completa", hint: "F11 · al abrir Cúmulo siempre vuelve a pantalla completa", run: () => D.toggleFullscreen() }]),
     { kind: "act", icon: "act", name: cfg.autostart ? "No arrancar Cúmulo con Windows" : "Arrancar Cúmulo con Windows", hint: cfg.autostart ? "Ahora arranca al encender" : "Se abre al encender el ordenador", run: async () => { cfg = await D.setConfig({ autostart: !cfg.autostart }); } },
     shellSt.enabled
       ? { kind: "act", icon: "act", name: "Volver al escritorio normal de Windows", hint: "Vuelven la barra de tareas y el escritorio de siempre", confirm: true, run: async () => { await D.shellSet(false); refreshShell(); } }
@@ -407,7 +421,7 @@
   function compute(files) {
     const q = norm(pIn.value.trim());
     const pick = (list, map, max) => list.map(x => ({ x, s: score(map(x), q) })).filter(o => o.s).sort((a, b) => b.s - a.s).slice(0, max).map(o => o.x);
-    const sess = (window.CUMULO_DATA.sessions || []).slice().sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive));
+    const sess = ((window.cumulo && window.cumulo.sessions && window.cumulo.sessions()) || window.CUMULO_DATA.sessions || []).slice().sort((a, b) => new Date(b.lastActive) - new Date(a.lastActive));
     const out = [];
     wins = window.__cumuloWins || [];
     const W = wins.map(w => ({ kind: "win", icon: "win", name: w.title, hint: w.name, h: w.h, path: w.path }));
@@ -449,7 +463,7 @@
       li.onclick = e => exec(it, e.ctrlKey);
       pList.append(li);
     });
-    if (!items.length) pList.innerHTML = `<li class="pal-empty">Nada con ese nombre</li>`;
+    if (!items.length) pList.innerHTML = `<li class="pal-empty">${searching ? "Buscando…" : "Nada con ese nombre"}</li>`;
   }
   function mark() {
     els.forEach((li, i) => li.setAttribute("aria-selected", String(i === sel)));
@@ -481,10 +495,12 @@
     sel = best >= 0 ? best : dir === "down" ? 0 : els.length - 1;
     mark(); return true;
   }
+  let searching = false; // mientras se buscan archivos no se dice «nada» todavía
   function refresh() {
-    items = compute(); sel = 0; render();
     const q = pIn.value.trim(), my = ++findSeq;
-    if (q.length >= 2) D.find(q).then(f => { if (my !== findSeq) return; const keep = items[sel]; items = compute(f); sel = Math.max(0, items.indexOf(keep)); render(); });
+    searching = q.length >= 2;
+    items = compute(); sel = 0; render();
+    if (searching) D.find(q).then(f => { if (my !== findSeq) return; searching = false; const keep = items[sel]; items = compute(f); sel = Math.max(0, items.indexOf(keep)); render(); }, () => { if (my === findSeq) { searching = false; render(); } });
   }
   async function exec(it, reveal) {
     if (it.confirm && !it.confirmArm) { it.confirmArm = true; render(); return; } // las acciones que apagan piden dos pulsaciones

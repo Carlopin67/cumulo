@@ -19,6 +19,7 @@ public class W {
   [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr h);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
   [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint c);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
   [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int i);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
@@ -51,7 +52,8 @@ while ($true) {
         $sb = New-Object System.Text.StringBuilder ($n + 1); [void][W]::GetWindowText($h, $sb, $n + 1)
         $wpid = 0; [void][W]::GetWindowThreadProcessId($h, [ref]$wpid)
         $pr = $procs[[int]$wpid]
-        [void]$out.Add(@{ h = $h.ToInt64(); title = $sb.ToString(); pid = $wpid; name = $pr.ProcessName; path = $pr.Path; min = [W]::IsIconic($h); fg = ($h -eq $fg) })
+        $cs = New-Object System.Text.StringBuilder 64; [void][W]::GetClassName($h, $cs, 64)
+        [void]$out.Add(@{ h = $h.ToInt64(); title = $sb.ToString(); pid = $wpid; name = $pr.ProcessName; path = $pr.Path; cls = $cs.ToString(); min = [W]::IsIconic($h); fg = ($h -eq $fg) })
         return $true }
       [void][W]::EnumWindows($cb, [IntPtr]::Zero)
       [Console]::Out.WriteLine("$id " + (ConvertTo-Json -Compress -Depth 3 @($out)))
@@ -105,8 +107,10 @@ async function list(dir, selfPid) {
   const raw = await ask("list", dir);
   let arr = []; try { arr = JSON.parse(raw || "[]"); } catch { arr = []; }
   if (!Array.isArray(arr)) arr = [arr];
-  const skip = /^(explorer|TextInputHost|ShellExperienceHost|StartMenuExperienceHost|SearchHost|LockApp|SystemSettingsAdminFlows|CrossDeviceResume)$/i;
-  return arr.filter(w => w && w.pid !== selfPid && !skip.test(w.name || "") && w.title !== "Program Manager" && !/Cúmulo/.test(w.path || ""));
+  const skip = /^(TextInputHost|ShellExperienceHost|StartMenuExperienceHost|SearchHost|LockApp|SystemSettingsAdminFlows|CrossDeviceResume)$/i;
+  // del explorador solo cuentan las ventanas de carpetas (no su escritorio ni su barra, si estuviera abierto)
+  const explorerOk = w => !/^explorer$/i.test(w.name || "") || w.cls === "CabinetWClass";
+  return arr.filter(w => w && w.pid !== selfPid && !skip.test(w.name || "") && explorerOk(w) && w.title !== "Program Manager" && !/Cúmulo/.test(w.path || ""));
 }
 
 // ── programas de inicio (lo que haría el escritorio de Windows al entrar) ──
