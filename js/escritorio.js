@@ -38,6 +38,7 @@
     load("script", { src: `${X}/xterm/lib/xterm.js` }).then(() => Promise.all([
       load("script", { src: `${X}/addon-fit/lib/addon-fit.js` }),
       load("script", { src: `${X}/addon-webgl/lib/addon-webgl.js` }).catch(() => {}),
+      load("script", { src: `${X}/addon-image/lib/addon-image.js` }).catch(() => {}),
     ])),
   ]);
 
@@ -81,6 +82,9 @@
     if (window.WebglAddon) {
       try { const gl = new window.WebglAddon.WebglAddon(); gl.onContextLoss(() => gl.dispose()); xt.loadAddon(gl); } catch { /* sin WebGL: se queda el normal */ }
     }
+    // imágenes dentro de la terminal (sixel e iTerm: imgcat, chafa, viu…)
+    if (window.ImageAddon) { try { xt.loadAddon(new window.ImageAddon.ImageAddon({ sixelSizeLimit: 8e6 })); } catch { /* sin imágenes */ } }
+    imageLinks(xt, opts.cwd);
     const t = { key, xt, fit, el, pid: 0, sessionId: opts.sessionId || null, exited: false, opts };
     terms.set(key, t);
     // copiar con selección, pegar texto; si el portapapeles solo tiene una imagen, Claude la lee con Alt+V
@@ -90,7 +94,9 @@
       if (e.ctrlKey && !e.altKey && k === "c" && xt.hasSelection()) { navigator.clipboard.writeText(xt.getSelection()); xt.clearSelection(); return false; }
       if (e.ctrlKey && !e.altKey && k === "v") {
         e.preventDefault();
-        navigator.clipboard.readText().then(txt => { if (txt) xt.paste(txt); else D.term.write(key, "\x1bv"); }).catch(() => D.term.write(key, "\x1bv"));
+        // texto tal cual; una imagen se guarda en un archivo y se pega su ruta (Claude la adjunta como imagen)
+        const img = () => clipImage().then(p => p ? xt.paste(p) : D.term.write(key, "\x1bv")).catch(() => D.term.write(key, "\x1bv"));
+        navigator.clipboard.readText().then(txt => { if (txt) xt.paste(txt); else img(); }).catch(img);
         return false;
       }
       if (e.altKey && e.key === "ArrowLeft") return false; // reservado para volver al cúmulo
@@ -142,12 +148,61 @@
   }
   function restart(t) { t.xt.clear(); start(t); }
 
+  // imagen del portapapeles → archivo temporal; devuelve su ruta (o null si no hay imagen)
+  async function clipImage() {
+    for (const it of await navigator.clipboard.read()) {
+      const type = it.types.find(x => x.startsWith("image/"));
+      if (type) return D.saveImage(new Uint8Array(await (await it.getType(type)).arrayBuffer()), type.split("/")[1]);
+    }
+    return null;
+  }
+
+  // rutas de imágenes que escribe Claude: al pasar el ratón se ve la imagen; con clic se abre
+  const RX_IMG = /(?:[A-Za-z]:[\\/]|~[\\/]|\.{1,2}[\\/])?[\w\-.~()\\/À-ÿ]*?[\w\-.~()À-ÿ]+\.(?:png|jpe?g|gif|webp|bmp|svg|avif)\b/gi;
+  const peek = document.createElement("div"); peek.className = "xt-peek"; peek.hidden = true;
+  const peekImg = document.createElement("img"); peek.append(peekImg); document.body.append(peek);
+  peekImg.onerror = () => { peek.hidden = true; };
+  function imageLinks(xt, cwd) {
+    const full = p => {
+      p = p.trim();
+      if (/^[A-Za-z]:[\\/]/.test(p)) return p;
+      if (/^~[\\/]/.test(p)) return D.home ? D.home + p.slice(1) : p;
+      return cwd ? cwd.replace(/[\\/]+$/, "") + "\\" + p.replace(/^\.[\\/]/, "") : p;
+    };
+    const url = p => "file:///" + encodeURI(p.replace(/\\/g, "/")).replace(/#/g, "%23");
+    xt.registerLinkProvider({
+      provideLinks(y, cb) {
+        const line = xt.buffer.active.getLine(y - 1); if (!line) return cb(undefined);
+        const txt = line.translateToString(true), out = []; let m;
+        RX_IMG.lastIndex = 0;
+        while ((m = RX_IMG.exec(txt))) {
+          const raw = m[0].replace(/^\s+/, ""), x = m.index + (m[0].length - raw.length);
+          if (!/[\\/]/.test(raw) && !cwd) continue;
+          const p = full(raw);
+          out.push({
+            text: raw, range: { start: { x: x + 1, y }, end: { x: x + raw.length, y } },
+            decorations: { underline: true, pointerCursor: true },
+            activate: () => D.open(p),
+            hover: e => {
+              peekImg.src = url(p); peek.hidden = false;
+              const w = 320, r = { x: Math.min(e.clientX + 14, innerWidth - w - 12), y: e.clientY + 18 };
+              if (r.y + 240 > innerHeight) r.y = e.clientY - 250;
+              peek.style.left = r.x + "px"; peek.style.top = r.y + "px";
+            },
+            leave: () => { peek.hidden = true; },
+          });
+        }
+        cb(out.length ? out : undefined);
+      },
+    });
+  }
+
   // arrastrar archivos al terminal escribe sus rutas (Claude las entiende como adjuntos)
   host.addEventListener("dragover", e => { e.preventDefault(); });
   host.addEventListener("drop", e => {
     e.preventDefault(); if (!active) return;
     const paths = [...e.dataTransfer.files].map(f => f.path).filter(Boolean);
-    if (paths.length) { D.term.write(active.key, paths.map(p => /\s/.test(p) ? `"${p}"` : p).join(" ")); active.xt.focus(); }
+    if (paths.length) { active.xt.paste(paths.map(p => /\s/.test(p) ? `"${p}"` : p).join(" ")); active.xt.focus(); }
   });
 
   function emit(t, status) { statusFns.forEach(f => f(t.key, status, t.sessionId)); }

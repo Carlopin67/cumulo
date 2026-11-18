@@ -21,6 +21,14 @@ const log = m => { LOG.push(new Date().toISOString().slice(11, 19) + " " + m); i
 const WEB = app.isPackaged ? path.join(__dirname, "web") : path.join(__dirname, "..");
 const XTERM = path.relative(WEB, path.join(__dirname, "node_modules", "@xterm")).split(path.sep).join("/");
 ipcMain.on("app:paths", e => { e.returnValue = { xterm: XTERM }; });
+// imagen del portapapeles (la lee la ventana) → archivo temporal, para pasarle la ruta a Claude
+ipcMain.handle("clip:save", (_e, bytes, ext) => {
+  const dir = path.join(os.tmpdir(), "cumulo-imagenes");
+  fs.mkdirSync(dir, { recursive: true });
+  const f = path.join(dir, "imagen-" + Date.now() + "." + (/^(png|jpe?g|gif|webp|bmp)$/.test(ext) ? ext : "png"));
+  fs.writeFileSync(f, Buffer.from(bytes));
+  return f;
+});
 const CLAUDE_DIR = path.join(os.homedir(), ".claude");
 const ESTADO = path.join(CLAUDE_DIR, "cumulo-estado.json");
 const CFG_FILE = () => path.join(app.getPath("userData"), "ajustes.json");

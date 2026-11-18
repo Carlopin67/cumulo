@@ -64,6 +64,8 @@ contextBridge.exposeInMainWorld("cumuloDesktop", {
   context: id => ctxFor(id),
   reloadData: () => ipcRenderer.invoke("data:read"),
   open: target => ipcRenderer.invoke("os:open", target),
+  saveImage: (bytes, ext) => ipcRenderer.invoke("clip:save", bytes, ext),
+  home: process.env.USERPROFILE || "",
   reveal: target => ipcRenderer.invoke("os:reveal", target),
   apps: () => ipcRenderer.invoke("os:apps"),
   icon: file => ipcRenderer.invoke("os:icon", file),

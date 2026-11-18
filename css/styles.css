@@ -742,3 +742,8 @@ html.desktop .session.real:not(.shell) .claude-box { display: block; }
 .cb-tip b::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 6px; border-radius: 50%; background: var(--ok); vertical-align: 1px; }
 .cb-tip.warn b::before { background: var(--warn); } .cb-tip.crit b::before { background: var(--crit); }
 .cb-tip.crit b { color: var(--crit); }
+
+/* vista previa de imágenes al pasar por su ruta en la terminal */
+.xt-peek { position: fixed; z-index: 60; max-width: 320px; max-height: 240px; padding: 4px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg); box-shadow: 0 8px 30px rgb(0 0 0 / .45); pointer-events: none; }
+.xt-peek img { display: block; max-width: 310px; max-height: 230px; object-fit: contain; border-radius: 3px; }
+.xt-peek[hidden] { display: none; }
