@@ -621,23 +621,92 @@
     const ask = status !== "busy" && status !== "idle";
     t.el.classList.toggle("ask", ask);
     t.el.classList.toggle("working", status === "busy");
-    if (!ask) { t.qTerm = false; t.el.classList.remove("qmode"); }
-    else checkQ(t);
+    if (!ask) t.qTerm = false;
+    checkQ(t);
     if (status === "busy" && was !== "busy") t.cv.since = Date.now();
     if (t.cv.refresh) t.cv.refresh();
     if (t === active && ask !== (was !== "busy" && was !== "idle" && was !== undefined)) requestAnimationFrame(() => focusT(t));
   }
-  // si lo que pregunta Claude es una encuesta, se contesta en su tarjeta y la terminal no sale
-  function checkQ(t) {
-    if (!t.cv || t.qTerm) return;
-    // solo si su tarjeta ya está en la conversación (si no, se contesta en la terminal, como antes)
-    const q = /Type something/.test(screenText(t, 30)) && !!t.cv.list.querySelector(".cv-q:not(.done)");
-    t.el.classList.toggle("qmode", q);
-    if (q && t === active) {
-      const f = t.cv.feed; f.scrollTop = f.scrollHeight;
-      const first = t.cv.list.querySelector(".cv-q:not(.done) .cv-qo");
-      if (first && document.activeElement && !document.activeElement.closest(".cv-q")) first.focus({ preventScroll: true });
+  // si lo que pregunta Claude es una encuesta, se contesta en una tarjeta y la terminal no sale.
+  // La pregunta no está en el registro hasta que se responde: se lee de su pantalla.
+  function parseQ(text) {
+    const L = text.split("\n").map(l => l.replace(/\s+$/, ""));
+    let end = -1; for (let i = L.length - 1; i >= 0; i--) if (/Enter to select|Submit answers/.test(L[i])) { end = i; break; }
+    if (end < 0) return null;
+    let tabs = -1; for (let i = end; i >= 0; i--) if (/[☐☒]\s|✔ Submit/.test(L[i])) { tabs = i; break; }
+    const tabLine = tabs >= 0 ? L[tabs] : "";
+    const steps = (tabLine.match(/[☐☒]/g) || []).length, doneSteps = (tabLine.match(/☒/g) || []).length;
+    const from = tabs >= 0 ? tabs + 1 : Math.max(0, end - 25);
+    const body = L.slice(from, end + 1);
+    if (body.some(l => /Review your answers/.test(l))) {
+      const sum = body.filter(l => /^\s*(●|→)/.test(l)).map(l => l.trim());
+      return { review: true, sum, steps, doneSteps };
     }
+    let title = "", opts = [], other = 0, multi = false;
+    for (const l of body) {
+      if (/^─+$/.test(l.trim()) || /Enter to select/.test(l)) continue;
+      const m = /^\s*(?:❯\s*)?(\d+)\.\s+(?:\[([ ✔])\]\s+)?(.*)$/.exec(l);
+      if (m) {
+        const label = m[3].trim();
+        if (m[2] !== undefined) multi = true;
+        if (/^Type something/.test(label)) { other = +m[1]; continue; }
+        if (/^Chat about this/.test(label)) continue;
+        opts.push({ n: +m[1], label, on: m[2] === "✔", desc: "" });
+        continue;
+      }
+      if (!l.trim() || /^\s*Submit\s*$/.test(l)) continue;
+      if (!opts.length) { if (!title) title = l.trim(); else if (!other) title += " " + l.trim(); }
+      else if (!other && /^\s{4,}/.test(l)) opts[opts.length - 1].desc += (opts[opts.length - 1].desc ? " " : "") + l.trim();
+    }
+    if (!opts.length) return null;
+    return { title, opts, other, multi, steps, doneSteps, last: steps <= 1 || doneSteps >= steps - 1 };
+  }
+  function liveQCard(t) {
+    if (t.cv.qcard) return t.cv.qcard;
+    const c = document.createElement("div"); c.className = "cv-q cv-qlive";
+    c.addEventListener("click", e => {
+      const b = e.target.closest("[data-k]"); if (!b || c.classList.contains("sending")) return;
+      const K = d => D.term.write(t.key, d);
+      const k = b.dataset.k;
+      if (k === "term") { t.qTerm = true; t.el.classList.remove("qmode"); focusT(t); return; }
+      if (k === "other") {
+        const v = c.querySelector(".cv-qo-other input").value.trim(); if (!v) return;
+        const q = t.cv.q; K(String(q.other));
+        setTimeout(() => { K(v); setTimeout(() => K(q.multi ? "\t" : "\r"), 260); }, 260);
+      } else K(k);
+      c.classList.add("sending"); setTimeout(() => { c.classList.remove("sending"); checkQ(t); }, 700);
+    });
+    c.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.matches(".cv-qo-other input")) { e.preventDefault(); c.querySelector('[data-k="other"]').click(); } });
+    t.cv.qcard = c; return c;
+  }
+  function paintQ(t, q) {
+    const c = liveQCard(t), sig = JSON.stringify(q);
+    if (c.dataset.sig === sig) return; c.dataset.sig = sig;
+    const esc2 = s => esc(String(s || ""));
+    const step = q.steps > 1 ? `<span class="cv-qstep">Pregunta ${Math.min(q.doneSteps + 1, q.steps)} de ${q.steps}</span>` : "";
+    if (q.review) {
+      c.innerHTML = `<div class="cv-qi"><p class="cv-qh"><span class="cv-qtag">Revisa tus respuestas</span></p>
+        <div class="cv-qsum">${q.sum.map(l => `<p class="${/^→/.test(l) ? "a" : "q"}">${esc2(l.replace(/^[●→]\s*/, ""))}</p>`).join("")}</div></div>
+        <div class="cv-qbar"><button type="button" class="cv-qterm" data-k="term">Ver en la terminal</button><span class="cv-qfoot"></span><button type="button" class="cv-qback" data-k="2">Cancelar</button><button type="button" class="cv-qsend" data-k="1">Enviar respuestas</button></div>`;
+      return;
+    }
+    const keep = c.querySelector(".cv-qo-other input"), typed = keep ? keep.value : "";
+    c.innerHTML = `<div class="cv-qi${q.multi ? " multi" : ""}"><p class="cv-qh"><span class="cv-qtag">Claude te pregunta</span>${step}<b>${esc2(q.title)}</b><small class="cv-qkind">${q.multi ? "Puedes elegir varias" : "Pulsa una opción"}</small></p>
+      <div class="cv-qopts">${q.opts.map(o => `<button type="button" class="cv-qo${o.on ? " on" : ""}" data-k="${o.n}"><span class="cv-qmark"></span><span class="cv-qt"><b>${esc2(o.label)}</b>${o.desc ? `<small>${esc2(o.desc)}</small>` : ""}</span></button>`).join("")}
+      ${q.other ? `<label class="cv-qo cv-qo-other"><span class="cv-qmark"></span><input type="text" placeholder="Otra respuesta…" spellcheck="false"><button type="button" class="cv-qok" data-k="other">${q.multi ? "Añadir" : "Enviar"}</button></label>` : ""}</div></div>
+      <div class="cv-qbar"><button type="button" class="cv-qterm" data-k="term">Ver en la terminal</button><span class="cv-qfoot"></span>${q.multi ? `<button type="button" class="cv-qsend" data-k="\t">${q.last ? "Revisar y enviar" : "Siguiente"}</button>` : ""}</div>`;
+    const inp = c.querySelector(".cv-qo-other input"); if (inp) inp.value = typed;
+  }
+  function checkQ(t) {
+    if (!t.cv) return;
+    const asking = t.status && t.status !== "busy" && t.status !== "idle";
+    const q = asking && !t.qTerm && !t.readonly ? parseQ(screenText(t, 45)) : null;
+    t.el.classList.toggle("qmode", !!q);
+    t.cv.q = q;
+    if (!q) { if (t.cv.qcard) { t.cv.qcard.remove(); t.cv.qcard.dataset.sig = ""; } return; }
+    paintQ(t, q);
+    const f = t.cv.feed, col = f.querySelector(".cv-col");
+    if (t.cv.qcard.parentNode !== col) { col.insertBefore(t.cv.qcard, t.cv.work); f.scrollTop = f.scrollHeight; }
   }
   setInterval(() => { terms.forEach(t => { if (t.status && t.status !== "busy" && t.status !== "idle") checkQ(t); }); }, 700);
   setInterval(() => {
