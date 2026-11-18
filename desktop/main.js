@@ -39,6 +39,40 @@ ipcMain.handle("clip:save", (_e, bytes, ext) => {
   return f;
 });
 const CLAUDE_DIR = path.join(os.homedir(), ".claude");
+
+// imágenes que Claude mira o crea en una sesión (Read de una imagen), para enseñarlas en su terminal
+// como hace la app del móvil. Se lee el .jsonl de la sesión por trozos: solo lo nuevo desde la última vez.
+const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp)$/i;
+const imgTail = new Map(); // id → { file, pos, rest, list }
+ipcMain.handle("sess:images", (_e, id) => {
+  if (typeof id !== "string" || !/^[\w-]+$/.test(id)) return [];
+  let t = imgTail.get(id);
+  if (!t || !t.file) {
+    let file = null;
+    try { for (const d of fs.readdirSync(sesiones.ROOT)) { const f = path.join(sesiones.ROOT, d, id + ".jsonl"); if (fs.existsSync(f)) { file = f; break; } } } catch { /* sin carpeta */ }
+    t = { file, pos: 0, rest: "", list: [] }; imgTail.set(id, t);
+    if (!file) return [];
+  }
+  try {
+    const size = fs.statSync(t.file).size;
+    if (size < t.pos) Object.assign(t, { pos: 0, rest: "", list: [] });
+    if (size > t.pos) {
+      const fd = fs.openSync(t.file, "r"), buf = Buffer.alloc(size - t.pos);
+      fs.readSync(fd, buf, 0, buf.length, t.pos); fs.closeSync(fd); t.pos = size;
+      const lines = (t.rest + buf.toString("utf8")).split("\n"); t.rest = lines.pop();
+      for (const line of lines) {
+        if (!line.includes('"tool_use"') || !/"file_path":"[^"]+\.(png|jpe?g|gif|webp|bmp)"/i.test(line)) continue;
+        let o; try { o = JSON.parse(line); } catch { continue; }
+        const parts = (o.message && Array.isArray(o.message.content)) ? o.message.content : [];
+        for (const p of parts) {
+          const f = p && p.type === "tool_use" && p.name === "Read" && p.input && p.input.file_path;
+          if (f && IMG_EXT.test(f) && !t.list.some(x => x.path === f)) t.list.push({ path: f, at: o.timestamp || null });
+        }
+      }
+    }
+  } catch { /* archivo en uso: la próxima vez */ }
+  return t.list.filter(x => fs.existsSync(x.path)); // las que ya se borraron no se enseñan
+});
 const ESTADO = path.join(CLAUDE_DIR, "cumulo-estado.json");
 const CFG_FILE = () => path.join(app.getPath("userData"), "ajustes.json");
 

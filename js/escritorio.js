@@ -208,6 +208,56 @@
     });
   }
 
+  // ── imágenes de la sesión: lo que Claude mira o crea aparece debajo de su terminal (como en el móvil) ──
+  const shots = document.createElement("div"); shots.className = "xt-shots"; shots.hidden = true;
+  shots.innerHTML = `<button type="button" class="xs-head" aria-expanded="true"><span>Imágenes</span><small></small><svg class="ico chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></svg></button><div class="xs-row" role="list"></div>`;
+  host.after(shots);
+  const shotRow = shots.querySelector(".xs-row"), shotHead = shots.querySelector(".xs-head");
+  const fileUrl = p => "file:///" + encodeURI(p.replace(/\\/g, "/")).replace(/#/g, "%23");
+  let folded = false; try { folded = localStorage.getItem("cumulo-shots-folded") === "1"; } catch { /* sin almacenamiento */ }
+  const setFold = v => { folded = v; shots.classList.toggle("folded", v); shotHead.setAttribute("aria-expanded", String(!v)); try { localStorage.setItem("cumulo-shots-folded", v ? "1" : "0"); } catch { /* da igual */ } requestAnimationFrame(() => fitNow(active)); };
+  setFold(folded);
+  shotHead.onclick = () => setFold(!folded);
+  // vista grande: clic o Esc para cerrar; doble clic abre el archivo
+  const box = document.createElement("div"); box.className = "xt-box"; box.hidden = true;
+  box.innerHTML = `<figure><img alt=""><figcaption></figcaption></figure>`;
+  document.body.append(box);
+  const boxImg = box.querySelector("img"), boxCap = box.querySelector("figcaption");
+  const closeBox = () => { box.hidden = true; if (active) active.xt.focus(); };
+  box.onclick = closeBox;
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && !box.hidden) { e.stopPropagation(); closeBox(); } }, true);
+  let shotKey = "", shotBusy = false;
+  async function refreshShots() {
+    const t = active;
+    if (!t || !t.sessionId || t.opts.shell || !D.sessImages) { if (!shots.hidden) { shots.hidden = true; shotKey = ""; fitNow(active); } return; }
+    if (shotBusy) return; shotBusy = true;
+    let list = []; try { list = await D.sessImages(t.sessionId); } catch { /* sin datos */ }
+    shotBusy = false;
+    if (t !== active) return;
+    const key = t.sessionId + "|" + list.map(x => x.path).join("|");
+    if (key === shotKey) return;
+    const same = shotKey.startsWith(t.sessionId + "|"), had = new Set([...shotRow.children].map(b => b.dataset.p));
+    shotKey = key;
+    shotRow.textContent = "";
+    list.slice(-12).forEach(x => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "xs-item"; b.dataset.p = x.path;
+      b.setAttribute("role", "listitem");
+      const name = x.path.split(/[\\/]/).pop(); b.title = name + "  (clic: ver · doble clic: abrir)";
+      const im = document.createElement("img"); im.alt = name; im.loading = "lazy"; im.src = fileUrl(x.path);
+      im.onerror = () => b.remove();
+      b.append(im);
+      if (same && !had.has(x.path)) b.classList.add("new");
+      b.onclick = () => { boxImg.src = im.src; boxCap.textContent = name; box.hidden = false; };
+      b.ondblclick = () => D.open(x.path);
+      shotRow.append(b);
+    });
+    shots.querySelector(".xs-head small").textContent = list.length;
+    const was = shots.hidden; shots.hidden = !list.length;
+    if (was !== shots.hidden) requestAnimationFrame(() => fitNow(active));
+    shotRow.scrollLeft = shotRow.scrollWidth;
+  }
+  setInterval(() => { if (!document.hidden) refreshShots(); }, 2000);
+
   // arrastrar archivos al terminal escribe sus rutas (Claude las entiende como adjuntos)
   host.addEventListener("dragover", e => { e.preventDefault(); });
   host.addEventListener("drop", e => {
@@ -345,10 +395,11 @@
       terms.forEach(o => { o.el.hidden = o !== t; });
       active = t;
       if (!t.opts.shell) claudeBox(t, t.ctx, t.busy ? "busy" : "idle");
+      refreshShots();
       requestAnimationFrame(() => { if (active === t) { fitNow(t); t.xt.focus(); } });
       return t;
     },
-    hide() { showSeq++; if (active) active.xt.blur(); active = null; },
+    hide() { showSeq++; if (active) active.xt.blur(); active = null; refreshShots(); },
     focus() { if (active) active.xt.focus(); },
     has: key => terms.has(key),
     kill(key) {
@@ -551,11 +602,13 @@
   dock.after(bar);
   const els = new Map(); // h → botón
   const icons = new Map();
+  const CLAUDE_APPS = /^(chrome|claude|WindowsTerminal|OpenConsole|powershell|pwsh|cmd|Code)$/i;
   let busy = false;
   async function tick() {
     if (busy || document.hidden) return; busy = true;
     try {
-      const list = await D.windows();
+      // solo lo que se usa con Claude (navegador y terminales); el resto vive en la barra de Windows
+      const list = (await D.windows()).filter(w => CLAUDE_APPS.test(w.name || ""));
       window.__cumuloWins = list;
       const seen = new Set();
       list.forEach(w => {
