@@ -816,7 +816,7 @@ html.raw-term .xt-ask-h { display: none !important; }
 .cv-list > .cv-user:first-child { border-top: 0; padding-top: 0; }
 .cv-utext { padding-left: 16px; border-left: 2px solid var(--accent); font: 500 15.5px/1.6 var(--prose); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; max-width: 96ch; }
 .cv-user .cv-imgs { display: flex; flex-wrap: wrap; gap: 10px; padding-left: 18px; margin-bottom: 10px; }
-.cv-user .cv-imgs .cv-img img { max-height: 200px; }
+.cv-user .cv-imgs .cv-img img { max-height: 150px; max-width: 260px; }
 
 /* Claude */
 .cv-claude { padding: 22px 0 30px; }
@@ -858,7 +858,7 @@ html.raw-term .xt-ask-h { display: none !important; }
 .cv-fig { display: grid; gap: 7px; justify-items: start; margin: 4px 0; }
 .cv-img { display: block; padding: 0; border: 1px solid var(--line-2); border-radius: 12px; overflow: hidden; background: var(--chrome); max-width: 100%; transition: border-color var(--t-fast), box-shadow var(--t-med); }
 .cv-img:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--line-2)); box-shadow: 0 14px 40px rgb(0 0 0 / .35); }
-.cv-img img { display: block; max-width: 100%; max-height: min(520px, 62vh); width: auto; height: auto; }
+.cv-img img { display: block; max-width: min(100%, 420px); max-height: 260px; width: auto; height: auto; }
 .cv-fig figcaption { font-size: 10px; color: var(--faint); padding-left: 2px; }
 .cv-fig.gone, .cv-gone { font-size: 10.5px; color: var(--faint); padding: 10px 14px; border: 1px dashed var(--line-2); border-radius: 10px; justify-self: start; }
 
@@ -900,3 +900,9 @@ html.raw-term .xt-ask-h { display: none !important; }
 .xt-box figure { display: grid; gap: 10px; justify-items: center; max-width: 100%; max-height: 100%; }
 .xt-box img { max-width: calc(100vw - 80px); max-height: calc(100vh - 110px); object-fit: contain; border-radius: 8px; box-shadow: var(--shadow); }
 .xt-box figcaption { font-size: 11px; color: #bbb; }
+
+/* sesión abierta en otra ventana: se lee aquí, se escribe allí */
+.cv-ro { margin-bottom: 8px; padding: 9px 12px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line-2)); background: color-mix(in srgb, var(--accent) 7%, transparent); font: 12.5px/1.5 var(--prose); color: var(--ink-2); }
+.cv-ro b { color: var(--accent); font-weight: 600; }
+.cv-ro[hidden] { display: none; }
+.cv-composer.ro .cv-box { opacity: .55; }

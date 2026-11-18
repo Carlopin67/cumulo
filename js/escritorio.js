@@ -131,11 +131,11 @@
       if (r.elsewhere) {
         t.exited = true;
         t.xt.write("\r\n\x1b[2m— Esta sesión ya está abierta en otra ventana. Aquí puedes leerla; para escribir, ciérrala allí y pulsa Intro.\x1b[0m\r\n");
-        if (t.cv) t.cv.input.placeholder = "Esta sesión está abierta en otra ventana: aquí solo se puede leer";
+        if (t.cv) t.cv.setReadonly(true);
         return;
       }
       t.pid = r.pid; t.exited = false;
-      if (t.cv) t.cv.input.placeholder = "Escribe a Claude…";
+      if (t.cv) t.cv.setReadonly(false);
       if (r.buffer) { t.xt.write(r.buffer); if (!t.opts.shell) sniff(t); }
     } catch (e) {
       t.exited = true;
@@ -436,15 +436,15 @@
           <button type="submit" class="cv-send" title="Enviar (Intro)" aria-label="Enviar">${IC.send}${IC.stop}</button>
         </div>
       </div>
-      <p class="cv-hint"><span><kbd>Intro</kbd> enviar</span><span><kbd>Mayús</kbd><kbd>Intro</kbd> nueva línea</span><span><kbd>Esc</kbd> parar</span><span>pega o arrastra imágenes</span><span class="cv-state"></span></p>`;
+      <p class="cv-hint"><span><kbd>Ctrl</kbd><kbd>Intro</kbd> enviar</span><span><kbd>Intro</kbd> nueva línea</span><span><kbd>Esc</kbd> parar</span><span>pega o arrastra imágenes</span><span class="cv-state"></span></p>`;
     const ta = c.querySelector("textarea"), tray = c.querySelector(".cv-tray"), file = c.querySelector("input[type=file]"), sendB = c.querySelector(".cv-send");
     const files = []; // rutas de imágenes ya guardadas
     const autosize = () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 220) + "px"; };
     const refresh = () => {
       const busy = t.status === "busy";
       c.classList.toggle("busy", busy && !ta.value.trim() && !files.length);
-      sendB.disabled = !busy && !ta.value.trim() && !files.length;
-      sendB.title = c.classList.contains("busy") ? "Parar (Esc)" : "Enviar (Intro)";
+      sendB.disabled = !t.readonly && !busy && !ta.value.trim() && !files.length;
+      sendB.title = t.readonly ? "Volver a intentar abrirla aquí" : c.classList.contains("busy") ? "Parar (Esc)" : "Enviar (Ctrl+Intro)";
     };
     const addPath = p => {
       if (!p) return;
@@ -471,13 +471,14 @@
     });
     ta.addEventListener("input", () => { autosize(); refresh(); });
     ta.addEventListener("keydown", e => {
-      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); c.requestSubmit(); }
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); c.requestSubmit(); }
       else if (e.key === "Escape" && t.status === "busy") { e.preventDefault(); e.stopPropagation(); D.term.write(t.key, "\x1b"); }
     });
     c.addEventListener("submit", e => {
       e.preventDefault();
       if (c.classList.contains("busy")) { D.term.write(t.key, "\x1b"); return; }
       const text = [ta.value.trim(), ...files.map(p => /\s/.test(p) ? `"${p}"` : p)].filter(Boolean).join(" ");
+      if (t.readonly) { restart(t); return; } // por si ya se cerró en la otra ventana
       if (!text || t.exited) { if (t.exited) restart(t); return; }
       D.term.write(t.key, "\x05\x15"); // lo que hubiera a medias en la línea de Claude, fuera
       setTimeout(() => D.term.write(t.key, "\x1b[200~" + text + "\x1b[201~"), 80);
@@ -485,6 +486,14 @@
       ta.value = ""; files.length = 0; tray.textContent = ""; tray.hidden = true; autosize(); refresh();
       t.cv.pinUntil = Date.now() + 4000; t.cv.feed.scrollTop = t.cv.feed.scrollHeight;
     });
+    const ro = document.createElement("p"); ro.className = "cv-ro"; ro.hidden = true;
+    ro.innerHTML = `<b>Solo lectura.</b> Esta sesión está abierta en otra ventana (por ejemplo, en Windows Terminal). Escribe allí, o ciérrala y pulsa <kbd>Ctrl</kbd><kbd>Intro</kbd> aquí para seguirla en Cúmulo.`;
+    c.prepend(ro);
+    t.cv.setReadonly = v => {
+      t.readonly = v; ro.hidden = !v; c.classList.toggle("ro", v);
+      ta.placeholder = v ? "Solo lectura: esta sesión está abierta en otra ventana" : "Escribe a Claude…";
+      refresh();
+    };
     t.cv.input = ta; t.cv.refresh = refresh; t.cv.stateEl = c.querySelector(".cv-state");
     refresh();
     return c;
