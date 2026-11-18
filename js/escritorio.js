@@ -346,6 +346,46 @@
         st.tools.d.querySelector(".cv-tn").textContent = st.tools.n > 1 ? `y ${st.tools.n - 1} más` : "";
         return;
       }
+      if (x.k === "q") {
+        st.tools = null;
+        const card = document.createElement("div"); card.className = "cv-q"; if (x.id) card.dataset.q = x.id;
+        x.questions.forEach(q => {
+          const box = document.createElement("div"); box.className = "cv-qi"; box.dataset.question = q.question;
+          box.innerHTML = `<p class="cv-qh"><span class="cv-qtag"></span><b></b></p><ul></ul><p class="cv-qother" hidden></p>`;
+          box.querySelector(".cv-qtag").textContent = q.header || "Pregunta";
+          box.querySelector("b").textContent = q.question;
+          const ul = box.querySelector("ul");
+          q.options.forEach((o, i) => {
+            const li = document.createElement("li"); li.dataset.label = o.label;
+            li.innerHTML = `<span class="cv-qn"></span><span class="cv-qt"><b></b><small></small></span>`;
+            li.querySelector(".cv-qn").textContent = String(i + 1);
+            li.querySelector("b").textContent = o.label;
+            li.querySelector("small").textContent = o.description;
+            ul.append(li);
+          });
+          card.append(box);
+        });
+        const foot = document.createElement("p"); foot.className = "cv-qfoot"; foot.textContent = "Esperando tu respuesta";
+        card.append(foot);
+        body.append(card); return;
+      }
+      if (x.k === "qa") {
+        // se marca en su tarjeta lo que respondiste (y si escribiste otra cosa, se enseña)
+        const sel = x.id ? `.cv-q[data-q="${CSS.escape(x.id)}"]` : null;
+        const card = (sel && (frag.querySelector(sel) || t.cv.list.querySelector(sel))) || [...t.cv.list.querySelectorAll(".cv-q:not(.done)"), ...frag.querySelectorAll(".cv-q:not(.done)")].pop();
+        if (card) {
+          card.classList.add("done");
+          card.querySelectorAll(".cv-qi").forEach(box => {
+            const a = x.answers[box.dataset.question]; if (a == null) return;
+            const picked = String(a).split(", ");
+            let hit = false;
+            box.querySelectorAll("li").forEach(li => { const on = picked.includes(li.dataset.label) || String(a) === li.dataset.label; li.classList.toggle("on", on); hit = hit || on; });
+            if (!hit) { const o = box.querySelector(".cv-qother"); o.hidden = false; o.textContent = String(a); }
+          });
+          card.querySelector(".cv-qfoot").textContent = "Respondida";
+        }
+        return;
+      }
       st.tools = null;
       if (x.k === "a") { const d = document.createElement("div"); d.className = "cv-a"; d.innerHTML = md(x.text); body.append(d); return; }
       if (x.k === "img") {
@@ -430,13 +470,14 @@
     const c = document.createElement("form"); c.className = "cv-composer"; c.autocomplete = "off";
     c.innerHTML = `<div class="cv-box">
         <div class="cv-tray" hidden></div>
-        <div class="cv-row">
-          <label class="cv-btn" title="Adjuntar imágenes">${IC.clip}<input type="file" accept="image/*" multiple hidden></label>
-          <textarea rows="1" placeholder="Escribe a Claude…" aria-label="Mensaje para Claude" spellcheck="false"></textarea>
-          <button type="submit" class="cv-send" title="Enviar (Intro)" aria-label="Enviar">${IC.send}${IC.stop}</button>
+        <textarea rows="1" placeholder="Escribe a Claude…" aria-label="Mensaje para Claude" spellcheck="false"></textarea>
+        <div class="cv-bar">
+          <label class="cv-btn" title="Adjuntar imágenes (también puedes pegarlas o arrastrarlas)">${IC.clip}<span>Imagen</span><input type="file" accept="image/*" multiple hidden></label>
+          <span class="cv-state"></span>
+          <span class="cv-keys"><span class="k-send"><kbd>Ctrl</kbd><kbd>↵</kbd> enviar</span><span class="k-stop"><kbd>Esc</kbd> parar</span></span>
+          <button type="submit" class="cv-send" title="Enviar (Ctrl+Intro)" aria-label="Enviar">${IC.send}${IC.stop}</button>
         </div>
-      </div>
-      <p class="cv-hint"><span><kbd>Ctrl</kbd><kbd>Intro</kbd> enviar</span><span><kbd>Intro</kbd> nueva línea</span><span><kbd>Esc</kbd> parar</span><span>pega o arrastra imágenes</span><span class="cv-state"></span></p>`;
+      </div>`;
     const ta = c.querySelector("textarea"), tray = c.querySelector(".cv-tray"), file = c.querySelector("input[type=file]"), sendB = c.querySelector(".cv-send");
     const files = []; // rutas de imágenes ya guardadas
     const autosize = () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 220) + "px"; };
@@ -487,8 +528,21 @@
       t.cv.pinUntil = Date.now() + 4000; t.cv.feed.scrollTop = t.cv.feed.scrollHeight;
     });
     const ro = document.createElement("p"); ro.className = "cv-ro"; ro.hidden = true;
-    ro.innerHTML = `<b>Solo lectura.</b> Esta sesión está abierta en otra ventana (por ejemplo, en Windows Terminal). Escribe allí, o ciérrala y pulsa <kbd>Ctrl</kbd><kbd>Intro</kbd> aquí para seguirla en Cúmulo.`;
+    ro.innerHTML = `<span><b>Solo lectura.</b> Esta sesión está abierta en otra ventana (por ejemplo, en Windows Terminal).</span><button type="button" class="cv-take">Traer aquí</button>`;
     c.prepend(ro);
+    // dos pasos: el primero avisa de lo que va a pasar; el segundo cierra la otra y la abre aquí
+    const take = ro.querySelector(".cv-take");
+    let armed = 0;
+    take.onclick = async () => {
+      if (!armed) {
+        armed = setTimeout(() => { armed = 0; take.textContent = "Traer aquí"; take.classList.remove("armed"); }, 5000);
+        take.textContent = "Se cerrará en la otra ventana · pulsa otra vez"; take.classList.add("armed"); return;
+      }
+      clearTimeout(armed); armed = 0; take.disabled = true; take.textContent = "Trayéndola…";
+      try { await D.takeover(t.sessionId); } catch { /* da igual: se intenta abrir igual */ }
+      take.disabled = false; take.textContent = "Traer aquí"; take.classList.remove("armed");
+      restart(t);
+    };
     t.cv.setReadonly = v => {
       t.readonly = v; ro.hidden = !v; c.classList.toggle("ro", v);
       ta.placeholder = v ? "Solo lectura: esta sesión está abierta en otra ventana" : "Escribe a Claude…";
@@ -513,6 +567,13 @@
     const t = active; if (!t || !t.cv || t.status !== "busy") return;
     const s = Math.round((Date.now() - (t.cv.since || Date.now())) / 1000);
     t.cv.work.querySelector("small").textContent = s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
+  }, 1000);
+  // en la caja de escribir, el modelo y el esfuerzo con los que va a responder
+  setInterval(() => {
+    const t = active; if (!t || !t.cv || !t.cv.stateEl) return;
+    const s = t.seen || {}, m = MODELS.find(x => x.id === s.model), e = EFFORTS.find(x => x[0] === s.effort);
+    const txt = [m && m.label, e && "esfuerzo " + e[1].toLowerCase()].filter(Boolean).join(" · ");
+    if (t.cv.stateEl.textContent !== txt) t.cv.stateEl.textContent = txt;
   }, 1000);
 
   // arrastrar archivos al terminal escribe sus rutas (Claude las entiende como adjuntos)

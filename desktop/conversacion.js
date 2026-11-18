@@ -73,12 +73,28 @@ function read(root, id) {
         let o; try { o = JSON.parse(line); } catch { continue; }
         if (o.isSidechain) continue;
         const at = o.timestamp || null;
-        if (o.type === "user") { const u = userItem(o); if (u) { u.at = at; t.items.push(u); } continue; }
+        if (o.type === "user") {
+          // la respuesta a una pregunta con opciones (AskUserQuestion)
+          const ans = o.toolUseResult && o.toolUseResult.answers;
+          if (ans && typeof ans === "object") {
+            const c = o.message && Array.isArray(o.message.content) ? o.message.content.find(p => p && p.type === "tool_result") : null;
+            t.items.push({ k: "qa", id: c ? c.tool_use_id : null, answers: ans, at });
+            continue;
+          }
+          const u = userItem(o); if (u) { u.at = at; t.items.push(u); }
+          continue;
+        }
         if (o.type !== "assistant" || !o.message || !Array.isArray(o.message.content)) continue;
         if (o.message.model === "<synthetic>") continue; // avisos que no escribe Claude («No response requested.»)
         for (const p of o.message.content) {
           if (!p) continue;
           if (p.type === "text" && p.text && p.text.trim()) t.items.push({ k: "a", text: p.text.trim(), at });
+          else if (p.type === "tool_use" && p.name === "AskUserQuestion" && p.input && Array.isArray(p.input.questions)) {
+            t.items.push({ k: "q", id: p.id, at, questions: p.input.questions.map(q => ({
+              question: String(q.question || ""), header: String(q.header || ""), multi: !!q.multiSelect,
+              options: (q.options || []).map(x => ({ label: String(x.label || ""), description: String(x.description || "") })),
+            })) });
+          }
           else if (p.type === "tool_use") {
             t.items.push({ k: "t", name: p.name, arg: toolArg(p.name, p.input), at });
             const f = p.name === "Read" && p.input && p.input.file_path;

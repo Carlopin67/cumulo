@@ -22,6 +22,7 @@ if (-not $paths) {
     ((Find '\\(PhysicalDisk|Disco f.sico)\(\*\)\\(Disk Write Bytes/sec|Bytes de escritura en disco/s)$') -replace '\(\*\)', '(_Total)'),
     (Find '\\GPU Engine\(\*\)\\Utilization Percentage$'),
     (Find '\\GPU Adapter Memory\(\*\)\\Dedicated Usage$'),
+    (Find '\\GPU Adapter Memory\(\*\)\\Shared Usage$'),
     (Find '\\(Network Interface|Interfaz de red)\(\*\)\\(Bytes Received/sec|Bytes recibidos/s)$'),
     (Find '\\(Network Interface|Interfaz de red)\(\*\)\\(Bytes Sent/sec|Bytes enviados/s)$')
   ) | ? { $_ }
@@ -30,7 +31,7 @@ if (-not $paths) {
 if (-not $paths) { exit 1 }
 $paths = $paths | % { if ($_ -match 'GPU Engine') { $_ -replace '\(\*\)', '(*engtype_3D)' } else { $_ } }
 Get-Counter -Counter $paths -Continuous -SampleInterval 2 | % {
-  $o = @{ cpu = 0; rd = 0; wr = 0; gpu = 0; vram = 0; down = 0; up = 0 }
+  $o = @{ cpu = 0; rd = 0; wr = 0; gpu = 0; vram = 0; shared = 0; down = 0; up = 0 }
   foreach ($s in $_.CounterSamples) {
     $p = $s.Path; $v = $s.CookedValue
     if ($p -match 'utilidad del procesador|processor utility') { $o.cpu = $v }
@@ -38,6 +39,7 @@ Get-Counter -Counter $paths -Continuous -SampleInterval 2 | % {
     elseif ($p -match 'escritura|write bytes') { $o.wr += $v }
     elseif ($p -match 'utilization percentage') { $o.gpu += $v }
     elseif ($p -match 'dedicated usage') { if ($v -gt $o.vram) { $o.vram = $v } }
+    elseif ($p -match 'shared usage') { $o.shared += $v } # la integrada (Intel) solo usa memoria compartida
     elseif ($p -match 'recibidos|received') { $o.down += $v }
     elseif ($p -match 'enviados|sent') { $o.up += $v }
   }
@@ -52,7 +54,7 @@ function start() {
   startedAt = Date.now();
   const file = path.join(dir, "contadores.ps1");
   try { fs.writeFileSync(file, "﻿" + PS); } catch { return; }
-  const me = spawn("powershell.exe", ["-NoProfile", "-NoLogo", "-ExecutionPolicy", "Bypass", "-File", file, path.join(dir, "contadores.txt")],
+  const me = spawn("powershell.exe", ["-NoProfile", "-NoLogo", "-ExecutionPolicy", "Bypass", "-File", file, path.join(dir, "contadores-2.txt")],
     { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
   ps = me;
   let buf = "";

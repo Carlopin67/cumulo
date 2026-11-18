@@ -82,7 +82,7 @@ ipcMain.handle("term:open", async (_e, { key, sessionId, cwd, cols, rows, shellO
   // serían dos Claude escribiendo en la misma conversación
   if (sessionId && !shellOnly) {
     const mine = new Set([...terms.values()].map(r => r.p.pid));
-    if (readLive().some(l => l.sessionId === sessionId && !mine.has(l.pid))) return { pid: 0, elsewhere: true, buffer: "" };
+    if (readLive().live.some(l => l.sessionId === sessionId && !mine.has(l.pid))) return { pid: 0, elsewhere: true, buffer: "" };
   }
   const dir = cwd && fs.existsSync(cwd) ? cwd : os.homedir();
   const file = shellOnly ? "powershell.exe" : CLAUDE;
@@ -105,6 +105,15 @@ ipcMain.handle("term:open", async (_e, { key, sessionId, cwd, cols, rows, shellO
   // con ConPTY el pid llega un instante después de crear el terminal: sin él no se sabría el estado de la sesión
   for (let i = 0; i < 60 && !p.pid; i++) await new Promise(r => setTimeout(r, 50));
   return { pid: p.pid, reused: false, buffer: "" };
+});
+// «Traer aquí»: cierra el Claude que tiene abierta esta sesión en otra ventana, para abrirla dentro de Cúmulo
+ipcMain.handle("sess:takeover", async (_e, id) => {
+  if (typeof id !== "string" || !/^[\w-]+$/.test(id)) return false;
+  const mine = new Set([...terms.values()].map(r => r.p.pid));
+  const others = readLive().live.filter(l => l.sessionId === id && !mine.has(l.pid));
+  for (const l of others) await new Promise(r => execFile("taskkill", ["/PID", String(l.pid), "/T", "/F"], { windowsHide: true }, () => r()));
+  for (let i = 0; i < 40 && readLive().live.some(l => l.sessionId === id && !mine.has(l.pid)); i++) await new Promise(r => setTimeout(r, 150));
+  return true;
 });
 ipcMain.on("term:write", (_e, key, d) => { const t = terms.get(key); if (t) { try { t.p.write(d); } catch { /* cerrándose */ } } });
 ipcMain.on("term:resize", (_e, key, c, r) => { const t = terms.get(key); if (t && c > 0 && r > 0) { try { t.p.resize(c, r); } catch { /* cerrado */ } } });
@@ -195,7 +204,7 @@ function sysTick() {
   sys = {
     cpu: { usage: c ? Math.min(100, c.cpu) : cpu, cores: sysStatic.cores, ghz: sysStatic.ghz, temp: 0 },
     ram: { used: (total - free) / 1e9, total: total / 1e9 },
-    vram: c ? { used: c.vram / 1073741824, total: g.total || 1, gpuUsage: Math.min(100, c.gpu), temp: g.temp } : g,
+    vram: c ? { used: c.vram / 1073741824, shared: (c.shared || 0) / 1073741824, total: g.total || 1, gpuUsage: Math.min(100, c.gpu), temp: g.temp } : g,
     disk: { used: sysStatic.disk.used / 1e9, total: sysStatic.disk.size / 1e9, read: c ? c.rd / 1e6 : 0, write: c ? c.wr / 1e6 : 0 },
     net: c ? { down: c.down / 1e6, up: c.up / 1e6 } : net,
     claude: claudeProc,
